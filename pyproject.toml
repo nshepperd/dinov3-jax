@@ -1,0 +1,30 @@
+[project]
+name = "dinov3-jax"
+version = "0.1.0"
+description = "DINOv3 jax port"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "jaxtorch==0.5.1",
+    "jax[cuda12]",
+    "torch",
+    "torchvision",
+    "flash-attn-jax",
+    "pytest",
+    "numpy",
+    "scipy",
+    "scikit-learn",
+    "einops",
+    "tqdm",
+    "matplotlib",
+    "ipykernel",
+    "ipywidgets",
+    "Pillow"
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["dinov3_jax"]

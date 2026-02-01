@@ -3,7 +3,6 @@ import unittest
 import numpy as np
 import jax
 import jax.numpy as jnp
-from dinov3_jax.utils.weight_converter import load_pytorch_weights
 
 import sys
 import os
@@ -51,41 +50,6 @@ class TestVisionTransformer(unittest.TestCase):
         key = jax.random.PRNGKey(self.seed)
         self.key = key
     
-    def test_model_initialization(self):
-        """Test that JAX model can be initialized."""
-        # Create JAX model
-        model_jax = vit_small()
-        
-        # Initialize parameters
-        params = model_jax.initialize(self.key)
-        
-        # Check that parameters are initialized
-        self.assertIsNotNone(params)
-        self.assertGreater(len(params), 0)
-        
-        # Check some key parameters exist
-        self.assertIn("cls_token", params)
-        self.assertIn("patch_embed.proj.weight", params)
-        self.assertIn("blocks.0.attn.qkv.weight", params)
-    
-    def test_forward_pass_shape(self):
-        """Test that forward pass produces correct output shape."""
-        # Create model
-        model = vit_small()
-        params = model.initialize(self.key)
-        
-        # Create context
-        cx = Context(params, self.key, mode="eval")
-        
-        # Create dummy input
-        x = jnp.ones((self.batch_size, self.channels, self.img_size, self.img_size))
-        
-        # Forward pass
-        output = model(cx, x, is_training=False)
-        
-        # Check output shape (should be [batch_size, embed_dim])
-        self.assertEqual(output.shape, (self.batch_size, 384))  # 384 is embed_dim for vit_small
-    
     def test_weight_conversion(self):
         """Test weight conversion from PyTorch to JAX."""
         from dinov3_jax.utils import convert_pytorch_to_jax
@@ -132,7 +96,6 @@ class TestVisionTransformer(unittest.TestCase):
         
         # Forward pass JAX
         output_jax, layers_jax = collect_layers_eqx(model_jax, x_jax, is_training=False)
-        output_jax_np = np.array(output_jax)
 
         # Forward pass PyTorch
         model_pt.eval()

@@ -38,7 +38,7 @@ def load_and_preprocess_image(path: str, image_size: int, patch_size: int):
     w_patches = int((w * image_size) / (h * patch_size))
     new_h = h_patches * patch_size
     new_w = w_patches * patch_size
-    image_resized = image.resize((new_w, new_h), Image.BILINEAR)
+    image_resized = image.resize((new_w, new_h), Image.Resampling.BILINEAR)
 
     # Convert to tensor
     img_array = np.array(image_resized).astype(np.float32) / 255.0
@@ -112,7 +112,7 @@ class SimilarityVisualizer:
         similarities = self.compute_similarity(self.features_norm_jax, target_idx)
         return np.array(similarities).reshape(self.H, self.W)
 
-    def render_frame(self, row: int, col: int) -> np.ndarray:
+    def render_frame(self, row: int, col: int) -> tuple[np.ndarray, tuple[float, float, float]]:
         """Render the blended visualization."""
         # Compute similarity
         sim_map = self.get_similarity_map(row, col)
@@ -125,7 +125,7 @@ class SimilarityVisualizer:
         sim_rgb = apply_colormap(sim_norm, 'viridis')
 
         # Resize similarity map to image size
-        sim_pil = Image.fromarray(sim_rgb).resize((self.img_w, self.img_h), Image.NEAREST)
+        sim_pil = Image.fromarray(sim_rgb).resize((self.img_w, self.img_h), Image.Resampling.NEAREST)
         sim_array = np.array(sim_pil).astype(np.float32) / 255.0
 
         # Blend with original
@@ -209,9 +209,17 @@ def main():
             f"Patch: ({vis.current_row}, {vis.current_col}) | "
             f"Similarity: [{stats[0]:.3f}, {stats[1]:.3f}] mean={stats[2]:.3f}")
 
-    def on_plot_click(sender, app_data):
+    def handle_mouse_input():
+        """Update if left mouse button is down and mouse is over the plot."""
+        if not dpg.is_mouse_button_down(0):  # 0 = left button
+            return
+
         mouse_pos = dpg.get_plot_mouse_pos()
         x, y = mouse_pos
+
+        # Check if mouse is within plot bounds
+        if x < 0 or x >= img_w or y < 0 or y >= img_h:
+            return
 
         # Convert to patch coordinates (flip y since plot axis is inverted)
         col = int(x / PATCH_SIZE)
@@ -221,9 +229,11 @@ def main():
         row = max(0, min(vis.H - 1, row))
         col = max(0, min(vis.W - 1, col))
 
-        vis.current_row = row
-        vis.current_col = col
-        update_display()
+        # Only update if position changed
+        if row != vis.current_row or col != vis.current_col:
+            vis.current_row = row
+            vis.current_col = col
+            update_display()
 
     def on_alpha_change(sender, app_data):
         vis.alpha = app_data
@@ -267,11 +277,6 @@ def main():
                     tag="image_series"
                 )
 
-        # Register click and drag handlers
-        with dpg.handler_registry():
-            dpg.add_mouse_click_handler(callback=on_plot_click)
-            dpg.add_mouse_drag_handler(button=0, callback=on_plot_click)  # Left mouse drag
-
     # Initial stats update
     update_display()
 
@@ -279,7 +284,11 @@ def main():
     dpg.setup_dearpygui()
     dpg.show_viewport()
     dpg.set_primary_window("main_window", True)
-    dpg.start_dearpygui()
+
+    # Manual render loop to check mouse state each frame
+    while dpg.is_dearpygui_running():
+        handle_mouse_input()
+        dpg.render_dearpygui_frame()
     dpg.destroy_context()
 
 

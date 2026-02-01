@@ -1,18 +1,29 @@
-from typing import Callable, List, Optional, Tuple, Union
+from functools import partial
+from typing import Callable, List, Literal, Optional, Tuple, Union
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-from jaxtorch import Module, Context
-from jaxtorch.nn import LayerNorm, GELU, Identity
+from jaxtyping import Array
 
 from .attention import SelfAttention
-from .ffn_layers import Mlp
+from .ffn_layers import Mlp, SwiGLUFFN
 from .layer_scale import LayerScale
+from .rms_norm import LayerNorm, RMSNorm
+
+import eepynox.utils as eu
 
 
-class SelfAttentionBlock(Module):
+class SelfAttentionBlock(eqx.Module):
     """Transformer block with self-attention and feed-forward network."""
     
+    norm1: LayerNorm | RMSNorm
+    attn: SelfAttention
+    ls1: LayerScale | None
+    norm2: LayerNorm | RMSNorm
+    mlp: Mlp | SwiGLUFFN
+    ls2: LayerScale | None
+
     def __init__(
         self,
         dim: int,
@@ -21,135 +32,115 @@ class SelfAttentionBlock(Module):
         qkv_bias: bool = False,
         proj_bias: bool = True,
         ffn_bias: bool = True,
-        drop: float = 0.0,
-        attn_drop: float = 0.0,
         init_values: Optional[float] = None,
-        drop_path: float = 0.0,
-        act_layer: Callable[..., Module] = GELU,
-        norm_layer: Callable[..., Module] = LayerNorm,
-        attn_class: Callable[..., Module] = SelfAttention,
-        ffn_layer: Callable[..., Module] = Mlp,
+        act_layer: Literal['gelu'] = 'gelu',
+        norm_layer: Literal['layernorm', 'layernormbf16', 'rmsnorm'] = 'layernorm',
+        attn_class: Literal['self_attention'] = 'self_attention',
+        ffn_layer: Literal['mlp', 'swiglu', 'swiglu32', 'swiglu64', 'swiglu128'] = 'mlp',
         mask_k_bias: bool = False,
-        device=None,  # Ignored in JAX
     ):
         super().__init__()
         
+        f_norm_layer = {
+            'layernorm': partial(LayerNorm, eps=1e-6),
+            'layernormbf16': partial(LayerNorm, eps=1e-5),
+            'rmsnorm': RMSNorm
+        }[norm_layer]
+        f_ffn_layer = {
+            'mlp': Mlp,
+            'swiglu': SwiGLUFFN,
+            'swiglu32': partial(SwiGLUFFN, align_to=32),
+            'swiglu64': partial(SwiGLUFFN, align_to=64),
+            'swiglu128': partial(SwiGLUFFN, align_to=128),
+        }[ffn_layer]
+        f_attn_class = {
+            'self_attention': SelfAttention,
+        }[attn_class]  # Only
+
         # First block: attention
-        self.norm1 = norm_layer(dim)
-        self.attn = attn_class(
+        self.norm1 = f_norm_layer(dim)
+        self.attn = f_attn_class(
             dim,
             num_heads=num_heads,
             qkv_bias=qkv_bias,
             proj_bias=proj_bias,
-            attn_drop=attn_drop,
-            proj_drop=drop,
             mask_k_bias=mask_k_bias,
         )
-        self.ls1 = LayerScale(dim, init_values=init_values) if init_values else Identity()
+        self.ls1 = LayerScale(dim, init_values=init_values) if init_values else None
         
         # Second block: feed-forward
-        self.norm2 = norm_layer(dim)
+        self.norm2 = f_norm_layer(dim)
         mlp_hidden_dim = int(dim * ffn_ratio)
-        self.mlp = ffn_layer(
+        self.mlp = f_ffn_layer(
             in_features=dim,
             hidden_features=mlp_hidden_dim,
             act_layer=act_layer,
-            drop=drop,
             bias=ffn_bias,
         )
-        self.ls2 = LayerScale(dim, init_values=init_values) if init_values else Identity()
-        
-        # Stochastic depth (drop path)
-        self.drop_path_rate = drop_path
+        self.ls2 = LayerScale(dim, init_values=init_values) if init_values else None
     
-    def _apply_drop_path(
-        self,
-        cx: Context,
-        x: jnp.ndarray,
-        residual: jnp.ndarray,
-        scale: float = 1.0
-    ) -> jnp.ndarray:
-        """Apply stochastic depth (drop path) during training."""
-        if cx.mode == "train" and self.drop_path_rate > 0:
-            # Random binary mask for dropping paths
-            keep_prob = 1 - self.drop_path_rate
-            shape = (x.shape[0],) + (1,) * (x.ndim - 1)
-            random_tensor = cx.random.bernoulli(keep_prob, shape=shape)
-            random_tensor = random_tensor / keep_prob
-            return x + residual * random_tensor * scale
+    def load_state_dict(self, state_dict: dict[str, Array], prefix: str = ""):
+        norm1 = self.norm1.load_state_dict(state_dict, prefix=prefix + "norm1.")
+        attn = self.attn.load_state_dict(state_dict, prefix=prefix + "attn.")
+        
+        if self.ls1:
+            ls1 = self.ls1.load_state_dict(state_dict, prefix=prefix + "ls1.")
         else:
-            return x + residual * scale
-    
-    def forward(
-        self,
-        cx: Context,
-        x_or_x_list: Union[jnp.ndarray, List[jnp.ndarray]],
-        rope_or_rope_list: Optional[Union[Tuple, List[Tuple]]] = None
-    ) -> Union[jnp.ndarray, List[jnp.ndarray]]:
-        """Forward pass for single tensor or list of tensors."""
+            ls1 = None
         
-        # Handle single tensor case
-        if isinstance(x_or_x_list, jnp.ndarray):
-            return self._forward_single(cx, x_or_x_list, rope_or_rope_list)
+        norm2 = self.norm2.load_state_dict(state_dict, prefix=prefix + "norm2.")
+        mlp = self.mlp.load_state_dict(state_dict, prefix=prefix + "mlp.")
         
-        # Handle list case
-        elif isinstance(x_or_x_list, list):
-            if rope_or_rope_list is None:
-                rope_or_rope_list = [None] * len(x_or_x_list)
-            return self._forward_list(cx, x_or_x_list, rope_or_rope_list)
-        
+        if self.ls2:
+            ls2 = self.ls2.load_state_dict(state_dict, prefix=prefix + "ls2.")
         else:
-            raise TypeError("Input must be jnp.ndarray or list of jnp.ndarray")
-    
-    def _forward_single(
-        self,
-        cx: Context,
-        x: jnp.ndarray,
-        rope: Optional[Tuple] = None
-    ) -> jnp.ndarray:
-        """Forward pass for a single tensor."""
+            ls2 = None
         
+        return eu.replace(
+            self,
+            norm1=norm1,
+            attn=attn,
+            ls1=ls1,
+            norm2=norm2,
+            mlp=mlp,
+            ls2=ls2,
+        )
+
+    # def _apply_drop_path(
+    #     self,
+    #     cx: Context,
+    #     x: jnp.ndarray,
+    #     residual: jnp.ndarray,
+    #     scale: float = 1.0
+    # ) -> jnp.ndarray:
+    #     """Apply stochastic depth (drop path) during training."""
+    #     if cx.mode == "train" and self.drop_path_rate > 0:
+    #         # Random binary mask for dropping paths
+    #         keep_prob = 1 - self.drop_path_rate
+    #         shape = (x.shape[0],) + (1,) * (x.ndim - 1)
+    #         random_tensor = cx.random.bernoulli(keep_prob, shape=shape)
+    #         random_tensor = random_tensor / keep_prob
+    #         return x + residual * random_tensor * scale
+    #     else:
+    #         return x + residual * scale
+    
+    def __call__(
+        self,
+        x: Array,
+        rope: Tuple | None = None,
+    ) -> Array:
         # Self-attention block
-        x_norm = self.norm1(cx, x)
-        attn_out = self.attn(cx, x_norm, rope=rope)
-        attn_out = self.ls1(cx, attn_out)
-        x = self._apply_drop_path(cx, x, attn_out)
+        x_norm = self.norm1(x)
+        attn_out = self.attn(x_norm, rope=rope)
+        if self.ls1:
+            attn_out = self.ls1(attn_out)
+        x = x + attn_out
         
         # Feed-forward block
-        x_norm = self.norm2(cx, x)
-        ffn_out = self.mlp(cx, x_norm)
-        ffn_out = self.ls2(cx, ffn_out)
-        x = self._apply_drop_path(cx, x, ffn_out)
+        x_norm = self.norm2(x)
+        ffn_out = self.mlp(x_norm)
+        if self.ls2:
+            ffn_out = self.ls2(ffn_out)
+        x = x + ffn_out
         
         return x
-    
-    def _forward_list(
-        self,
-        cx: Context,
-        x_list: List[jnp.ndarray],
-        rope_list: List[Optional[Tuple]]
-    ) -> List[jnp.ndarray]:
-        """Forward pass for a list of tensors (multi-crop training)."""
-        
-        outputs = []
-        
-        # Process attention for all inputs
-        x_norm_list = [self.norm1(cx, x) for x in x_list]
-        attn_out_list = self.attn.forward_list(cx, x_norm_list, rope_list=rope_list)
-        
-        # Apply layer scale and residual
-        for x, attn_out in zip(x_list, attn_out_list):
-            attn_out = self.ls1(cx, attn_out)
-            x_attn = self._apply_drop_path(cx, x, attn_out)
-            outputs.append(x_attn)
-        
-        # Process feed-forward for all outputs
-        final_outputs = []
-        for x_attn in outputs:
-            x_norm = self.norm2(cx, x_attn)
-            ffn_out = self.mlp(cx, x_norm)
-            ffn_out = self.ls2(cx, ffn_out)
-            x_ffn = self._apply_drop_path(cx, x_attn, ffn_out)
-            final_outputs.append(x_ffn)
-        
-        return final_outputs

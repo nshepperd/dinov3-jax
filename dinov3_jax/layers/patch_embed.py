@@ -1,21 +1,12 @@
-import math
-from typing import Union, Tuple
-
-import jax
+import equinox as eqx
 import jax.numpy as jnp
-from jaxtorch import Module, Context, init
-from jaxtorch.nn import Conv2d, LayerNorm
+from jaxtyping import Array
+
+import eepynox.utils as eu
+from eepynox.nn.conv2d import Conv2d
 
 
-def make_2tuple(x):
-    if isinstance(x, tuple):
-        assert len(x) == 2
-        return x
-    assert isinstance(x, int)
-    return (x, x)
-
-
-class PatchEmbed(Module):
+class PatchEmbed(eqx.Module):
     """
     2D image to patch embedding: (B,C,H,W) -> (B,N,D) or (B,H,W,D)
     
@@ -24,30 +15,35 @@ class PatchEmbed(Module):
         patch_size: Patch token size.
         in_chans: Number of input image channels.
         embed_dim: Number of linear projection output channels.
-        norm_layer: Normalization layer class.
         flatten_embedding: Whether to flatten spatial dimensions.
     """
+    proj: Conv2d
+    img_size: int = eqx.field(static=True)
+    patch_size: int = eqx.field(static=True)
+    patches_resolution: tuple[int, int] = eqx.field(static=True)
+    num_patches: int = eqx.field(static=True)
+    in_chans: int = eqx.field(static=True)
+    embed_dim: int = eqx.field(static=True)
+    flatten_embedding: bool = eqx.field(static=True)
+
     
     def __init__(
         self,
-        img_size: Union[int, Tuple[int, int]] = 224,
-        patch_size: Union[int, Tuple[int, int]] = 16,
+        img_size: int = 224,
+        patch_size: int = 16,
         in_chans: int = 3,
         embed_dim: int = 768,
-        norm_layer: type = None,
         flatten_embedding: bool = True,
     ):
         super().__init__()
         
-        image_HW = make_2tuple(img_size)
-        patch_HW = make_2tuple(patch_size)
         patch_grid_size = (
-            image_HW[0] // patch_HW[0],
-            image_HW[1] // patch_HW[1],
+            img_size // patch_size,
+            img_size // patch_size,
         )
         
-        self.img_size = image_HW
-        self.patch_size = patch_HW
+        self.img_size = img_size
+        self.patch_size = patch_size
         self.patches_resolution = patch_grid_size
         self.num_patches = patch_grid_size[0] * patch_grid_size[1]
         
@@ -57,53 +53,30 @@ class PatchEmbed(Module):
         
         # Conv2d layer for patch projection
         # Convert tuple to integers if needed for stride
-        stride_val = patch_HW[0] if isinstance(patch_HW, tuple) else patch_HW
+        stride_val = patch_size
         self.proj = Conv2d(
             in_chans, 
             embed_dim, 
-            kernel_size=patch_HW, 
+            kernel_size=patch_size,
             stride=stride_val,
             padding=0,
-            bias=True
+            use_bias=True
         )
-        
-        # Optional normalization
-        self.use_norm = norm_layer is not None
-        if self.use_norm:
-            self.norm = norm_layer(embed_dim)
     
-    def setup(self, cx: Context):
-        super().setup(cx)
-        # Custom initialization for patch embedding
-        k = 1 / (self.in_chans * (self.patch_size[0] ** 2))
-        cx[self.proj.weight] = jax.random.uniform(
-            cx.rng.split(), 
-            cx[self.proj.weight].shape,
-            minval=-math.sqrt(k),
-            maxval=math.sqrt(k)
-        )
-        if self.proj.bias is not None:
-            cx[self.proj.bias] = jax.random.uniform(
-                cx.rng.split(),
-                cx[self.proj.bias].shape,
-                minval=-math.sqrt(k),
-                maxval=math.sqrt(k)
-            )
+    def load_state_dict(self, state_dict: dict[str, Array], prefix: str = ""):
+        proj = self.proj.load_state_dict(state_dict, prefix + "proj.")
+        return eu.replace(self, proj=proj)
     
-    def forward(self, cx: Context, x: jnp.ndarray) -> jnp.ndarray:
+    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
         B, C, H, W = x.shape
         
         # Apply convolution to extract patches
-        x = self.proj(cx, x)  # B, embed_dim, H', W'
+        x = self.proj(x)  # B, embed_dim, H', W'
         _, _, H_out, W_out = x.shape
         
         # Reshape: (B, embed_dim, H', W') -> (B, H'*W', embed_dim)
         x = x.reshape(B, self.embed_dim, -1)  # B, embed_dim, H'*W'
         x = x.transpose(0, 2, 1)  # B, H'*W', embed_dim
-        
-        # Apply normalization if specified
-        if self.use_norm:
-            x = self.norm(cx, x)
         
         # Optionally reshape to spatial format
         if not self.flatten_embedding:

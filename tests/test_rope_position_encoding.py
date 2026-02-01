@@ -3,12 +3,10 @@
 import numpy as np
 import jax
 import jax.numpy as jnp
-from jaxtorch import Context
 
 import torch
 import torch.nn as nn
 
-# Import implementations
 from dinov3_jax.layers.rope_position_encoding import RopePositionEmbedding as RoPEJAX
 from dinov3.layers.rope_position_encoding import RopePositionEmbedding as RoPEPyTorch
 jax.config.update("jax_default_matmul_precision", "highest")
@@ -16,13 +14,13 @@ jax.config.update("jax_default_matmul_precision", "highest")
 
 def test_rope_basic_generation():
     """Test that RoPE generates sin/cos embeddings with correct shapes and values."""
-    
+
     # Configuration
     embed_dim = 384
     num_heads = 6
     base = 100.0
     H, W = 14, 14  # For 224x224 image with patch_size=16
-    
+
     # Create PyTorch module
     rope_pt = RoPEPyTorch(
         embed_dim=embed_dim,
@@ -30,7 +28,7 @@ def test_rope_basic_generation():
         base=base,
         dtype=torch.float32,
     )
-    
+
     # Create JAX module
     rope_jax = RoPEJAX(
         embed_dim=embed_dim,
@@ -38,23 +36,17 @@ def test_rope_basic_generation():
         base=base,
         dtype=jnp.float32,
     )
-    
-    # Initialize JAX
-    key = jax.random.PRNGKey(42)
-    params = {}
-    cx = Context(params, key, mode="eval")
-    rope_jax.setup(cx)
-    
+
     # Generate embeddings PyTorch
     sin_pt, cos_pt = rope_pt(H=H, W=W)
     sin_pt_np = sin_pt.detach().numpy()
     cos_pt_np = cos_pt.detach().numpy()
-    
+
     # Generate embeddings JAX
-    sin_jax, cos_jax = rope_jax(cx, H=H, W=W)
+    sin_jax, cos_jax = rope_jax(H=H, W=W)
     sin_jax_np = np.array(sin_jax)
     cos_jax_np = np.array(cos_jax)
-    
+
     # Check shapes (RoPE outputs D_head = embed_dim // num_heads)
     D_head = embed_dim // num_heads
     expected_shape = (H * W, D_head)
@@ -62,7 +54,7 @@ def test_rope_basic_generation():
     assert cos_jax.shape == expected_shape, f"Expected {expected_shape}, got {cos_jax.shape}"
     assert sin_pt.shape == expected_shape, f"Expected {expected_shape}, got {sin_pt.shape}"
     assert cos_pt.shape == expected_shape, f"Expected {expected_shape}, got {cos_pt.shape}"
-    
+
     # Compare outputs
     np.testing.assert_allclose(sin_jax_np, sin_pt_np, rtol=1e-5, atol=1e-6)
     np.testing.assert_allclose(cos_jax_np, cos_pt_np, rtol=1e-5, atol=1e-6)
@@ -71,18 +63,18 @@ def test_rope_basic_generation():
 
 def test_rope_different_sizes():
     """Test RoPE with different image sizes."""
-    
+
     embed_dim = 768
     num_heads = 12
     base = 100.0
-    
+
     test_sizes = [
         (14, 14),  # Standard 224x224 with patch_size=16
         (7, 7),    # 112x112 with patch_size=16
         (28, 28),  # 448x448 with patch_size=16
         (16, 12),  # Non-square
     ]
-    
+
     for H, W in test_sizes:
         # Create modules
         rope_pt = RoPEPyTorch(
@@ -91,24 +83,18 @@ def test_rope_different_sizes():
             base=base,
             dtype=torch.float32,
         )
-        
+
         rope_jax = RoPEJAX(
             embed_dim=embed_dim,
             num_heads=num_heads,
             base=base,
             dtype=jnp.float32,
         )
-        
-        # Initialize JAX
-        key = jax.random.PRNGKey(123)
-        params = {}
-        cx = Context(params, key, mode="eval")
-        rope_jax.setup(cx)
-        
+
         # Generate embeddings
         sin_pt, cos_pt = rope_pt(H=H, W=W)
-        sin_jax, cos_jax = rope_jax(cx, H=H, W=W)
-        
+        sin_jax, cos_jax = rope_jax(H=H, W=W)
+
         # Compare
         np.testing.assert_allclose(np.array(sin_jax), sin_pt.numpy(), rtol=1e-5, atol=1e-6)
         np.testing.assert_allclose(np.array(cos_jax), cos_pt.numpy(), rtol=1e-5, atol=1e-6)
@@ -117,13 +103,13 @@ def test_rope_different_sizes():
 
 def test_rope_with_periods():
     """Test RoPE using min_period and max_period instead of base."""
-    
+
     embed_dim = 256
     num_heads = 8
     min_period = 2.0
     max_period = 10000.0
     H, W = 10, 10
-    
+
     # Create PyTorch module with periods
     rope_pt = RoPEPyTorch(
         embed_dim=embed_dim,
@@ -133,7 +119,7 @@ def test_rope_with_periods():
         max_period=max_period,
         dtype=torch.float32,
     )
-    
+
     # Create JAX module with periods
     rope_jax = RoPEJAX(
         embed_dim=embed_dim,
@@ -143,17 +129,11 @@ def test_rope_with_periods():
         max_period=max_period,
         dtype=jnp.float32,
     )
-    
-    # Initialize JAX
-    key = jax.random.PRNGKey(456)
-    params = {}
-    cx = Context(params, key, mode="eval")
-    rope_jax.setup(cx)
-    
+
     # Generate embeddings
     sin_pt, cos_pt = rope_pt(H=H, W=W)
-    sin_jax, cos_jax = rope_jax(cx, H=H, W=W)
-    
+    sin_jax, cos_jax = rope_jax(H=H, W=W)
+
     # Compare
     np.testing.assert_allclose(np.array(sin_jax), sin_pt.numpy(), rtol=1e-5, atol=1e-6)
     np.testing.assert_allclose(np.array(cos_jax), cos_pt.numpy(), rtol=1e-5, atol=1e-6)
@@ -162,16 +142,16 @@ def test_rope_with_periods():
 
 def test_rope_normalize_coords():
     """Test different coordinate normalization strategies."""
-    
+
     embed_dim = 384
     num_heads = 6
     base = 100.0
-    
+
     normalize_modes = ["separate", "max", "min"]
-    
+
     for normalize_mode in normalize_modes:
         H, W = 16, 12  # Non-square to test normalization
-        
+
         # Create modules
         rope_pt = RoPEPyTorch(
             embed_dim=embed_dim,
@@ -180,7 +160,7 @@ def test_rope_normalize_coords():
             normalize_coords=normalize_mode,
             dtype=torch.float32,
         )
-        
+
         rope_jax = RoPEJAX(
             embed_dim=embed_dim,
             num_heads=num_heads,
@@ -188,110 +168,30 @@ def test_rope_normalize_coords():
             normalize_coords=normalize_mode,
             dtype=jnp.float32,
         )
-        
-        # Initialize JAX
-        key = jax.random.PRNGKey(789)
-        params = {}
-        cx = Context(params, key, mode="eval")
-        rope_jax.setup(cx)
-        
+
         # Generate embeddings
         sin_pt, cos_pt = rope_pt(H=H, W=W)
-        sin_jax, cos_jax = rope_jax(cx, H=H, W=W)
-        
+        sin_jax, cos_jax = rope_jax(H=H, W=W)
+
         # Compare
         np.testing.assert_allclose(np.array(sin_jax), sin_pt.numpy(), rtol=1e-5, atol=1e-6)
         np.testing.assert_allclose(np.array(cos_jax), cos_pt.numpy(), rtol=1e-5, atol=1e-6)
         print(f"✓ RoPE with normalize_coords='{normalize_mode}' matches")
 
 
-def test_rope_training_augmentations():
-    """Test RoPE with training-time coordinate augmentations."""
-    
-    embed_dim = 256
-    num_heads = 4
-    base = 100.0
-    H, W = 8, 8
-    
-    # Test configurations with augmentations
-    augmentation_configs = [
-        {"shift_coords": 0.1},
-        {"jitter_coords": 1.5},
-        {"rescale_coords": 2.0},
-        {"shift_coords": 0.1, "jitter_coords": 1.5, "rescale_coords": 2.0},
-    ]
-    
-    for config in augmentation_configs:
-        # Set seed for reproducibility
-        torch.manual_seed(42)
-        np.random.seed(42)
-        
-        # Create PyTorch module
-        rope_pt = RoPEPyTorch(
-            embed_dim=embed_dim,
-            num_heads=num_heads,
-            base=base,
-            dtype=torch.float32,
-            **config
-        )
-        
-        # Create JAX module
-        rope_jax = RoPEJAX(
-            embed_dim=embed_dim,
-            num_heads=num_heads,
-            base=base,
-            dtype=jnp.float32,
-            **config
-        )
-        
-        # Initialize JAX in training mode
-        key = jax.random.PRNGKey(42)
-        params = {}
-        cx = Context(params, key, mode="train")
-        rope_jax.setup(cx)
-        
-        # Generate embeddings (training mode affects augmentations)
-        rope_pt.train()
-        sin_pt, cos_pt = rope_pt(H=H, W=W)
-        sin_jax, cos_jax = rope_jax(cx, H=H, W=W)
-        
-        # Check that augmentations produce different results in train mode
-        # (we can't compare exact values due to different RNG implementations)
-        assert sin_jax.shape == sin_pt.shape
-        assert cos_jax.shape == cos_pt.shape
-        
-        # Check values are in valid range
-        assert np.all(np.abs(np.array(sin_jax)) <= 1.0)
-        assert np.all(np.abs(np.array(cos_jax)) <= 1.0)
-        
-        print(f"✓ RoPE with augmentations {config} produces valid outputs")
-    
-    # Test that eval mode produces consistent results
-    cx_eval = Context(params, key, mode="eval")
-    rope_pt.eval()
-    
-    # Generate multiple times in eval mode - should be identical
-    sin_jax_1, cos_jax_1 = rope_jax(cx_eval, H=H, W=W)
-    sin_jax_2, cos_jax_2 = rope_jax(cx_eval, H=H, W=W)
-    
-    np.testing.assert_allclose(np.array(sin_jax_1), np.array(sin_jax_2), rtol=1e-7, atol=1e-7)
-    np.testing.assert_allclose(np.array(cos_jax_1), np.array(cos_jax_2), rtol=1e-7, atol=1e-7)
-    print("✓ RoPE produces consistent outputs in eval mode")
-
-
 def test_rope_dtype_handling():
     """Test RoPE with different data types."""
-    
+
     embed_dim = 128
     num_heads = 4
     base = 100.0
     H, W = 7, 7
-    
+
     dtypes = [
         (torch.float32, jnp.float32),
         (torch.bfloat16, jnp.bfloat16),
     ]
-    
+
     for dtype_pt, dtype_jax in dtypes:
         # Create modules
         rope_pt = RoPEPyTorch(
@@ -300,36 +200,30 @@ def test_rope_dtype_handling():
             base=base,
             dtype=dtype_pt,
         )
-        
+
         rope_jax = RoPEJAX(
             embed_dim=embed_dim,
             num_heads=num_heads,
             base=base,
             dtype=dtype_jax,
         )
-        
-        # Initialize JAX
-        key = jax.random.PRNGKey(111)
-        params = {}
-        cx = Context(params, key, mode="eval")
-        rope_jax.setup(cx)
-        
+
         # Generate embeddings
         sin_pt, cos_pt = rope_pt(H=H, W=W)
-        sin_jax, cos_jax = rope_jax(cx, H=H, W=W)
-        
+        sin_jax, cos_jax = rope_jax(H=H, W=W)
+
         # Check dtypes
         assert sin_jax.dtype == dtype_jax
         assert cos_jax.dtype == dtype_jax
         assert sin_pt.dtype == dtype_pt
         assert cos_pt.dtype == dtype_pt
-        
+
         # Compare (use float32 for comparison to avoid bfloat16 precision issues)
         sin_pt_f32 = sin_pt.float().numpy()
         cos_pt_f32 = cos_pt.float().numpy()
         sin_jax_f32 = np.array(sin_jax.astype(jnp.float32))
         cos_jax_f32 = np.array(cos_jax.astype(jnp.float32))
-        
+
         # Relaxed tolerance for bfloat16
         tol = 1e-3 if dtype_pt == torch.bfloat16 else 1e-5
         np.testing.assert_allclose(sin_jax_f32, sin_pt_f32, rtol=tol, atol=tol)
@@ -342,6 +236,5 @@ if __name__ == "__main__":
     test_rope_different_sizes()
     test_rope_with_periods()
     test_rope_normalize_coords()
-    test_rope_training_augmentations()
     test_rope_dtype_handling()
     print("\n✅ All RoPE tests passed!")

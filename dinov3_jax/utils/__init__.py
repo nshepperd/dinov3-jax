@@ -1,3 +1,4 @@
-from .weight_converter import convert_pytorch_to_jax, load_pytorch_weights
-
-__all__ = ["convert_pytorch_to_jax", "load_pytorch_weights"]
+from .weight_converter import (
+    to_jax as to_jax,
+    convert_pytorch_to_jax as convert_pytorch_to_jax
+)

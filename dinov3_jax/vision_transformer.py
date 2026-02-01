@@ -1,21 +1,26 @@
+from __future__ import annotations
+
 import logging
 from functools import partial
 from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple, Union
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-from jaxtorch import Module, Context, init
-from jaxtorch.nn import LayerNorm, ModuleList, Identity, GELU
+from jaxtyping import Array, Float, Int
 
+import eepynox.utils as eu
+from dinov3_jax.layers.rms_norm import LayerNorm
+from eepynox.nn.activation import Identity
+
+from .config import DinoV3Config
 from .layers import (
-    PatchEmbed,
-    RopePositionEmbedding,
-    SelfAttention,
-    SelfAttentionBlock,
     Mlp,
-    SwiGLUFFN,
+    PatchEmbed,
     RMSNorm,
-    LayerScale,
+    RopePositionEmbedding,
+    SelfAttentionBlock,
+    SwiGLUFFN,
 )
 
 logger = logging.getLogger("dinov3_jax")
@@ -35,265 +40,253 @@ norm_layer_dict = {
     "rmsnorm": RMSNorm,
 }
 
-dtype_dict = {
-    "fp32": jnp.float32,
-    "fp16": jnp.float16,
-    "bf16": jnp.bfloat16,
+dtype_dict: dict[str, jnp.dtype] = {
+    "fp32": jnp.dtype(jnp.float32),
+    "fp16": jnp.dtype(jnp.float16),
+    "bf16": jnp.dtype(jnp.bfloat16),
 }
 
 
-class DinoVisionTransformer(Module):
+class DinoVisionTransformer(eqx.Module):
     """DINOv3 Vision Transformer implementation in JAX."""
     
+    patch_embed: PatchEmbed
+    cls_token: Array | None
+    storage_tokens: Array | None
+    rope_embed: RopePositionEmbedding
+    blocks: list[SelfAttentionBlock]
+    norm: RMSNorm | LayerNorm
+    cls_norm: RMSNorm | LayerNorm | None
+    local_cls_norm: RMSNorm | LayerNorm | None
+    head: Identity
+    mask_token: Array | None
+
+    config: DinoV3Config = eqx.field(static=True)
+    # n_storage_tokens: int = eqx.field(static=True)
+
     def __init__(
         self,
         *,
-        img_size: int = 224,
-        patch_size: int = 16,
-        in_chans: int = 3,
-        pos_embed_rope_base: float = 100.0,
-        pos_embed_rope_min_period: Optional[float] = None,
-        pos_embed_rope_max_period: Optional[float] = None,
-        pos_embed_rope_normalize_coords: Literal["min", "max", "separate"] = "separate",
-        pos_embed_rope_shift_coords: Optional[float] = None,
-        pos_embed_rope_jitter_coords: Optional[float] = None,
-        pos_embed_rope_rescale_coords: Optional[float] = None,
-        pos_embed_rope_dtype: str = "bf16",
-        embed_dim: int = 768,
-        depth: int = 12,
-        num_heads: int = 12,
-        ffn_ratio: float = 4.0,
-        qkv_bias: bool = True,
-        drop_path_rate: float = 0.0,
-        layerscale_init: Optional[float] = None,
-        norm_layer: str = "layernorm",
-        ffn_layer: str = "mlp",
-        ffn_bias: bool = True,
-        proj_bias: bool = True,
-        n_storage_tokens: int = 0,
-        mask_k_bias: bool = False,
-        untie_cls_and_patch_norms: bool = False,
-        untie_global_and_local_cls_norm: bool = False,
-        device: Any = None,  # Ignored in JAX
-        **ignored_kwargs,
+        config: DinoV3Config,
+        dtype: jnp.dtype = jnp.bfloat16,
     ):
         super().__init__()
+        self.config = config
         
-        if len(ignored_kwargs) > 0:
-            logger.warning(f"Ignored kwargs: {ignored_kwargs}")
-        
-        norm_layer_cls = norm_layer_dict[norm_layer]
-        
-        self.num_features = self.embed_dim = embed_dim
-        self.n_blocks = depth
-        self.num_heads = num_heads
-        self.patch_size = patch_size
+        # self.num_features = self.embed_dim = config.embed_dim
+        # self.n_blocks = config.depth
+        # self.num_heads = config.num_heads
+        # self.patch_size = config.patch_size
         
         # Patch embedding
         self.patch_embed = PatchEmbed(
-            img_size=img_size,
-            patch_size=patch_size,
-            in_chans=in_chans,
-            embed_dim=embed_dim,
+            img_size=config.img_size,
+            patch_size=config.patch_size,
+            in_chans=config.in_chans,
+            embed_dim=config.embed_dim,
             flatten_embedding=False,
         )
         
         # Class token
-        self.cls_token = init.normal(1, 1, embed_dim, stddev=0.02)
+        # self.cls_token = init.normal(1, 1, embed_dim, stddev=0.02)
+        self.cls_token = None
         
         # Storage tokens (registers)
-        self.n_storage_tokens = n_storage_tokens
-        if self.n_storage_tokens > 0:
-            self.storage_tokens = init.normal(1, n_storage_tokens, embed_dim, stddev=0.02)
+        # self.n_storage_tokens = config.n_storage_tokens
+        self.storage_tokens = None
+        # if self.n_storage_tokens > 0:
+        #     self.storage_tokens = init.normal(1, n_storage_tokens, embed_dim, stddev=0.02)
         
         # RoPE position embedding
-        logger.info(f"using base={pos_embed_rope_base} for rope")
-        logger.info(f"using min_period={pos_embed_rope_min_period} for rope")
-        logger.info(f"using max_period={pos_embed_rope_max_period} for rope")
-        logger.info(f"using normalize_coords={pos_embed_rope_normalize_coords} for rope")
-        logger.info(f"using shift_coords={pos_embed_rope_shift_coords} for rope")
-        logger.info(f"using rescale_coords={pos_embed_rope_rescale_coords} for rope")
-        logger.info(f"using jitter_coords={pos_embed_rope_jitter_coords} for rope")
-        logger.info(f"using dtype={pos_embed_rope_dtype} for rope")
+        logger.info(f"using base={config.pos_embed_rope_base} for rope")
+        logger.info(f"using min_period={config.pos_embed_rope_min_period} for rope")
+        logger.info(f"using max_period={config.pos_embed_rope_max_period} for rope")
+        logger.info(f"using normalize_coords={config.pos_embed_rope_normalize_coords} for rope")
+        logger.info(f"using shift_coords={config.pos_embed_rope_shift_coords} for rope")
+        logger.info(f"using rescale_coords={config.pos_embed_rope_rescale_coords} for rope")
+        logger.info(f"using jitter_coords={config.pos_embed_rope_jitter_coords} for rope")
+        logger.info(f"using dtype={config.pos_embed_rope_dtype} for rope")
         
         self.rope_embed = RopePositionEmbedding(
-            embed_dim=embed_dim,
-            num_heads=num_heads,
-            base=pos_embed_rope_base,
-            min_period=pos_embed_rope_min_period,
-            max_period=pos_embed_rope_max_period,
-            normalize_coords=pos_embed_rope_normalize_coords,
-            shift_coords=pos_embed_rope_shift_coords,
-            jitter_coords=pos_embed_rope_jitter_coords,
-            rescale_coords=pos_embed_rope_rescale_coords,
-            dtype=dtype_dict[pos_embed_rope_dtype],
+            embed_dim=config.embed_dim,
+            num_heads=config.num_heads,
+            base=config.pos_embed_rope_base,
+            min_period=config.pos_embed_rope_min_period,
+            max_period=config.pos_embed_rope_max_period,
+            normalize_coords=config.pos_embed_rope_normalize_coords,
+            shift_coords=config.pos_embed_rope_shift_coords,
+            jitter_coords=config.pos_embed_rope_jitter_coords,
+            rescale_coords=config.pos_embed_rope_rescale_coords,
+            dtype=dtype_dict[config.pos_embed_rope_dtype],
         )
         
         # Transformer blocks
-        logger.info(f"using {ffn_layer} layer as FFN")
-        ffn_layer_cls = ffn_layer_dict[ffn_layer]
+        logger.info(f"using {config.ffn_layer} layer as FFN")
         
-        self.blocks = ModuleList()
-        for i in range(depth):
+        self.blocks = []
+        for i in range(config.depth):
             block = SelfAttentionBlock(
-                dim=embed_dim,
-                num_heads=num_heads,
-                ffn_ratio=ffn_ratio,
-                qkv_bias=qkv_bias,
-                proj_bias=proj_bias,
-                ffn_bias=ffn_bias,
-                drop_path=drop_path_rate,
-                norm_layer=norm_layer_cls,
-                act_layer=GELU,
-                ffn_layer=ffn_layer_cls,
-                init_values=layerscale_init,
-                mask_k_bias=mask_k_bias,
+                dim=config.embed_dim,
+                num_heads=config.num_heads,
+                ffn_ratio=config.ffn_ratio,
+                qkv_bias=config.qkv_bias,
+                proj_bias=config.proj_bias,
+                ffn_bias=config.ffn_bias,
+                norm_layer=config.norm_layer,
+                act_layer='gelu',
+                ffn_layer=config.ffn_layer,
+                init_values=config.layerscale_init,
+                mask_k_bias=config.mask_k_bias,
             )
             self.blocks.append(block)
         
+        norm_layer_cls = norm_layer_dict[config.norm_layer]
+
         # Final normalization
-        self.norm = norm_layer_cls(embed_dim)
+        self.norm = norm_layer_cls(config.embed_dim)
         
         # Optional untied norms
-        self.untie_cls_and_patch_norms = untie_cls_and_patch_norms
-        if untie_cls_and_patch_norms:
-            self.cls_norm = norm_layer_cls(embed_dim)
+        # self.untie_cls_and_patch_norms = config.untie_cls_and_patch_norms
+        if config.untie_cls_and_patch_norms:
+            self.cls_norm = norm_layer_cls(config.embed_dim)
+        else:
+            self.cls_norm = None
         
-        self.untie_global_and_local_cls_norm = untie_global_and_local_cls_norm
-        if untie_global_and_local_cls_norm:
-            self.local_cls_norm = norm_layer_cls(embed_dim)
+        # self.untie_global_and_local_cls_norm = config.untie_global_and_local_cls_norm
+        if config.untie_global_and_local_cls_norm:
+            self.local_cls_norm = norm_layer_cls(config.embed_dim)
+        else:
+            self.local_cls_norm = None
         
         # Head (identity for feature extraction)
         self.head = Identity()
         
         # Mask token for masked modeling
-        self.mask_token = init.zeros(1, embed_dim)
+        # self.mask_token = init.zeros(1, embed_dim)
+        self.mask_token = None
     
+    def load_state_dict(self, state_dict: dict[str, Array], prefix='') -> DinoVisionTransformer:
+        patch_embed = self.patch_embed.load_state_dict(state_dict, prefix=prefix + 'patch_embed.')
+        cls_token = state_dict[prefix + 'cls_token']
+        storage_tokens = state_dict.get(prefix + 'storage_tokens', None)
+        rope_embed = self.rope_embed #.load_state_dict(state_dict, prefix=prefix + 'rope_embed.')
+        blocks = []
+        for i, block in enumerate(self.blocks):
+            block_loaded = block.load_state_dict(state_dict, prefix=prefix + f'blocks.{i}.')
+            blocks.append(block_loaded)
+        norm = self.norm.load_state_dict(state_dict, prefix=prefix + 'norm.')
+        cls_norm = None
+        if self.cls_norm is not None:
+            cls_norm = self.cls_norm.load_state_dict(state_dict, prefix=prefix + 'cls_norm.')
+        local_cls_norm = None
+        if self.local_cls_norm is not None:
+            local_cls_norm = self.local_cls_norm.load_state_dict(state_dict, prefix=prefix + 'local_cls_norm.')
+        mask_token = state_dict.get(prefix + 'mask_token', None)
+        return eu.replace(
+            self,
+            patch_embed=patch_embed,
+            cls_token=cls_token,
+            storage_tokens=storage_tokens,
+            rope_embed=rope_embed,
+            blocks=blocks,
+            norm=norm,
+            cls_norm=cls_norm,
+            local_cls_norm=local_cls_norm,
+            mask_token=mask_token,
+        )
+
     def prepare_tokens_with_masks(
         self,
-        cx: Context,
-        x: jnp.ndarray,
-        masks: Optional[jnp.ndarray] = None
-    ) -> Tuple[jnp.ndarray, Tuple[int, int]]:
+        x: Array,
+        masks: Optional[Array] = None
+    ) -> Tuple[Array, Tuple[int, int]]:
         """Prepare tokens from image patches with optional masking."""
         
-        x = self.patch_embed(cx, x)
+        x = self.patch_embed(x)
         B, H, W, _ = x.shape
         x = x.reshape(B, H * W, -1)
         
         # Apply mask token if masks provided
         if masks is not None:
-            mask_token = cx[self.mask_token].astype(x.dtype)
+            mask_token = self.mask_token.astype(x.dtype)
             x = jnp.where(masks[:, :, None], mask_token[None, :, :], x)
-            cls_token = cx[self.cls_token]
+            cls_token = self.cls_token
         else:
-            cls_token = cx[self.cls_token] + 0 * cx[self.mask_token]
+            cls_token = self.cls_token + 0 * self.mask_token
         
         # Prepare storage tokens
-        if self.n_storage_tokens > 0:
-            storage_tokens = cx[self.storage_tokens]
+        if self.config.n_storage_tokens > 0:
+            storage_tokens = self.storage_tokens
         else:
             storage_tokens = jnp.empty((1, 0, cls_token.shape[-1]), dtype=cls_token.dtype)
         
         # Concatenate cls token, storage tokens, and patch tokens
-        cls_token = jnp.broadcast_to(cls_token, (B, 1, self.embed_dim))
-        storage_tokens = jnp.broadcast_to(storage_tokens, (B, self.n_storage_tokens, self.embed_dim))
+        cls_token = jnp.broadcast_to(cls_token, (B, 1, self.config.embed_dim))
+        storage_tokens = jnp.broadcast_to(storage_tokens, (B, self.config.n_storage_tokens, self.config.embed_dim))
         
         x = jnp.concatenate([cls_token, storage_tokens, x], axis=1)
         
         return x, (H, W)
     
-    def forward_features_list(
+    def forward_features(
         self,
-        cx: Context,
-        x_list: List[jnp.ndarray],
-        masks_list: List[Optional[jnp.ndarray]]
-    ) -> List[Dict[str, jnp.ndarray]]:
+        x: Array,
+        masks: Optional[Array] = None
+    ) -> Dict[str, Array]:
         """Forward pass for a list of inputs (multi-crop training)."""
         
         # Prepare tokens for each input
-        x_tokens = []
-        rope_hw = []
-        for x, masks in zip(x_list, masks_list):
-            tokens, hw_tuple = self.prepare_tokens_with_masks(cx, x, masks)
-            x_tokens.append(tokens)
-            rope_hw.append(hw_tuple)
+        tokens, rope_hw = self.prepare_tokens_with_masks(x, masks)
         
         # Process through transformer blocks
         for block in self.blocks:
             # Compute RoPE for each input
-            rope_list = []
-            for H, W in rope_hw:
-                rope_sincos = self.rope_embed(cx, H=H, W=W)
-                rope_list.append(rope_sincos)
-            
+            H,W = rope_hw
+            rope = self.rope_embed(H=H, W=W)
             # Forward through block
-            x_tokens = block(cx, x_tokens, rope_list)
+            tokens = block(tokens, rope)
         
+        x, masks = tokens, masks
         # Apply final normalization and prepare outputs
-        outputs = []
-        for idx, (x, masks) in enumerate(zip(x_tokens, masks_list)):
-            # Apply appropriate normalization
-            if self.untie_cls_and_patch_norms or self.untie_global_and_local_cls_norm:
-                if self.untie_global_and_local_cls_norm and cx.mode == "train" and idx == 1:
-                    # Local crops get local norm
-                    x_norm_cls_reg = self.local_cls_norm(cx, x[:, :self.n_storage_tokens + 1])
-                elif self.untie_cls_and_patch_norms:
-                    x_norm_cls_reg = self.cls_norm(cx, x[:, :self.n_storage_tokens + 1])
-                else:
-                    x_norm_cls_reg = self.norm(cx, x[:, :self.n_storage_tokens + 1])
-                x_norm_patch = self.norm(cx, x[:, self.n_storage_tokens + 1:])
+        # Apply appropriate normalization
+        if self.config.untie_cls_and_patch_norms or self.config.untie_global_and_local_cls_norm:
+            # if self.config.untie_global_and_local_cls_norm and cx.mode == "train" and idx == 1:
+            #     # Local crops get local norm
+            #     x_norm_cls_reg = self.local_cls_norm(cx, x[:, :self.config.n_storage_tokens + 1])
+            if self.config.untie_cls_and_patch_norms:
+                assert self.cls_norm is not None
+                x_norm_cls_reg = self.cls_norm(x[:, :self.config.n_storage_tokens + 1])
             else:
-                x_norm = self.norm(cx, x)
-                x_norm_cls_reg = x_norm[:, :self.n_storage_tokens + 1]
-                x_norm_patch = x_norm[:, self.n_storage_tokens + 1:]
-            
-            # Prepare output dictionary
-            output = {
-                "x_norm_clstoken": x_norm_cls_reg[:, 0],
-                "x_storage_tokens": x_norm_cls_reg[:, 1:],
-                "x_norm_patchtokens": x_norm_patch,
-                "x_prenorm": x,
-                "masks": masks,
-            }
-            outputs.append(output)
-        
-        return outputs
-    
-    def forward_features(
-        self,
-        cx: Context,
-        x: Union[jnp.ndarray, List[jnp.ndarray]],
-        masks: Optional[Union[jnp.ndarray, List[jnp.ndarray]]] = None
-    ) -> Union[Dict[str, jnp.ndarray], List[Dict[str, jnp.ndarray]]]:
-        """Forward features extraction."""
-        
-        if isinstance(x, jnp.ndarray):
-            # Single input
-            if masks is None or isinstance(masks, jnp.ndarray):
-                return self.forward_features_list(cx, [x], [masks])[0]
-            else:
-                raise TypeError("Masks must be jnp.ndarray for single input")
+                x_norm_cls_reg = self.norm(x[:, :self.config.n_storage_tokens + 1])
+            x_norm_patch = self.norm(x[:, self.config.n_storage_tokens + 1:])
         else:
-            # List of inputs
-            if masks is None:
-                masks = [None] * len(x)
-            return self.forward_features_list(cx, x, masks)
+            x_norm = self.norm(x)
+            x_norm_cls_reg = x_norm[:, :self.config.n_storage_tokens + 1]
+            x_norm_patch = x_norm[:, self.config.n_storage_tokens + 1:]
+        
+        # Prepare output dictionary
+        output = {
+            "x_norm_clstoken": x_norm_cls_reg[:, 0],
+            "x_storage_tokens": x_norm_cls_reg[:, 1:],
+            "x_norm_patchtokens": x_norm_patch,
+            "x_prenorm": x,
+            "masks": masks,
+        }
+        return output
     
     def get_intermediate_layers(
         self,
-        cx: Context,
-        x: jnp.ndarray,
+        x: Array,
         *,
         n: Union[int, Sequence] = 1,
         reshape: bool = False,
         return_class_token: bool = False,
         return_extra_tokens: bool = False,
         norm: bool = True,
-    ) -> Tuple[Union[jnp.ndarray, Tuple[jnp.ndarray, ...]]]:
+    ) -> Tuple[Union[Array, Tuple[Array, ...]]]:
         """Get intermediate layer outputs."""
         
-        x, (H, W) = self.prepare_tokens_with_masks(cx, x)
+        x, (H, W) = self.prepare_tokens_with_masks(x)
         
         # Determine which blocks to take
         total_blocks = len(self.blocks)
@@ -305,8 +298,8 @@ class DinoVisionTransformer(Module):
         # Forward through blocks
         outputs = []
         for i, block in enumerate(self.blocks):
-            rope_sincos = self.rope_embed(cx, H=H, W=W)
-            x = block(cx, x, rope_sincos)
+            rope_sincos = self.rope_embed(H=H, W=W)
+            x = block(x, rope_sincos)
             
             if i in blocks_to_take:
                 outputs.append(x)
@@ -317,18 +310,18 @@ class DinoVisionTransformer(Module):
         if norm:
             outputs_normed = []
             for out in outputs:
-                if self.untie_cls_and_patch_norms:
-                    x_norm_cls_reg = self.cls_norm(cx, out[:, :self.n_storage_tokens + 1])
-                    x_norm_patch = self.norm(cx, out[:, self.n_storage_tokens + 1:])
+                if self.config.untie_cls_and_patch_norms:
+                    x_norm_cls_reg = self.cls_norm(out[:, :self.config.n_storage_tokens + 1])
+                    x_norm_patch = self.norm(out[:, self.config.n_storage_tokens + 1:])
                     outputs_normed.append(jnp.concatenate([x_norm_cls_reg, x_norm_patch], axis=1))
                 else:
-                    outputs_normed.append(self.norm(cx, out))
+                    outputs_normed.append(self.norm(out))
             outputs = outputs_normed
         
         # Extract different token types
         class_tokens = [out[:, 0] for out in outputs]
-        extra_tokens = [out[:, 1:self.n_storage_tokens + 1] for out in outputs]
-        outputs = [out[:, self.n_storage_tokens + 1:] for out in outputs]
+        extra_tokens = [out[:, 1:self.config.n_storage_tokens + 1] for out in outputs]
+        outputs = [out[:, self.config.n_storage_tokens + 1:] for out in outputs]
         
         # Reshape if requested
         if reshape:
@@ -349,36 +342,37 @@ class DinoVisionTransformer(Module):
         else:
             return tuple(zip(outputs, class_tokens, extra_tokens))
     
-    def forward(
+    def __call__(
         self,
-        cx: Context,
         *args,
         is_training: bool = False,
         **kwargs
-    ) -> Union[List[Dict[str, jnp.ndarray]], jnp.ndarray]:
+    ) -> Dict[str, Array] | Array:
         """Forward pass."""
         
-        ret = self.forward_features(cx, *args, **kwargs)
+        ret = self.forward_features(*args, **kwargs)
         if is_training:
             return ret
         else:
             # Return class token for inference
             if isinstance(ret, dict):
-                return self.head(cx, ret["x_norm_clstoken"])
+                return self.head(ret["x_norm_clstoken"])
             else:
                 # If list, return first element's class token
-                return self.head(cx, ret[0]["x_norm_clstoken"])
-
+                return self.head(ret[0]["x_norm_clstoken"])
 
 # Model constructors
 def vit_small(patch_size=16, **kwargs):
     """Vision Transformer Small variant."""
-    model = DinoVisionTransformer(
-        patch_size=patch_size,
+    config = DinoV3Config(
         embed_dim=384,
         depth=12,
         num_heads=6,
-        ffn_ratio=4,
+        ffn_ratio=4.0,
+        patch_size=patch_size,
+    )
+    model = DinoVisionTransformer(
+        config=config,
         **kwargs,
     )
     return model
@@ -386,12 +380,15 @@ def vit_small(patch_size=16, **kwargs):
 
 def vit_base(patch_size=16, **kwargs):
     """Vision Transformer Base variant."""
-    model = DinoVisionTransformer(
-        patch_size=patch_size,
+    config = DinoV3Config(
         embed_dim=768,
         depth=12,
         num_heads=12,
-        ffn_ratio=4,
+        ffn_ratio=4.0,
+        patch_size=patch_size,
+    )
+    model = DinoVisionTransformer(
+        config=config,
         **kwargs,
     )
     return model
@@ -399,12 +396,15 @@ def vit_base(patch_size=16, **kwargs):
 
 def vit_large(patch_size=16, **kwargs):
     """Vision Transformer Large variant."""
-    model = DinoVisionTransformer(
-        patch_size=patch_size,
+    config = DinoV3Config(
         embed_dim=1024,
         depth=24,
         num_heads=16,
-        ffn_ratio=4,
+        ffn_ratio=4.0,
+        patch_size=patch_size,
+    )
+    model = DinoVisionTransformer(
+        config=config,
         **kwargs,
     )
     return model
@@ -412,12 +412,15 @@ def vit_large(patch_size=16, **kwargs):
 
 def vit_so400m(patch_size=16, **kwargs):
     """Vision Transformer SO400M variant."""
-    model = DinoVisionTransformer(
+    config = DinoV3Config(
         patch_size=patch_size,
         embed_dim=1152,
         depth=27,
         num_heads=18,
         ffn_ratio=3.777777778,
+    )
+    model = DinoVisionTransformer(
+        config=config,
         **kwargs,
     )
     return model
@@ -425,12 +428,15 @@ def vit_so400m(patch_size=16, **kwargs):
 
 def vit_huge2(patch_size=16, **kwargs):
     """Vision Transformer Huge2 variant."""
-    model = DinoVisionTransformer(
+    config = DinoV3Config(
         patch_size=patch_size,
         embed_dim=1280,
         depth=32,
         num_heads=20,
-        ffn_ratio=4,
+        ffn_ratio=4.0,
+    )
+    model = DinoVisionTransformer(
+        config=config,
         **kwargs,
     )
     return model
@@ -438,12 +444,15 @@ def vit_huge2(patch_size=16, **kwargs):
 
 def vit_giant2(patch_size=16, **kwargs):
     """Vision Transformer Giant2 variant."""
-    model = DinoVisionTransformer(
+    config = DinoV3Config(
         patch_size=patch_size,
         embed_dim=1536,
         depth=40,
         num_heads=24,
-        ffn_ratio=4,
+        ffn_ratio=4.0,
+    )
+    model = DinoVisionTransformer(
+        config=config,
         **kwargs,
     )
     return model
@@ -451,12 +460,15 @@ def vit_giant2(patch_size=16, **kwargs):
 
 def vit_7b(patch_size=16, **kwargs):
     """Vision Transformer 7B variant."""
-    model = DinoVisionTransformer(
+    config = DinoV3Config(
         patch_size=patch_size,
         embed_dim=4096,
         depth=40,
         num_heads=32,
         ffn_ratio=3,
+    )
+    model = DinoVisionTransformer(
+        config=config,
         **kwargs,
     )
     return model
@@ -473,7 +485,7 @@ def dinov3_vits16():
         n_storage_tokens=4,                  # default is 0
         mask_k_bias=True                     # default is False
     )
-    return DinoVisionTransformer(**vits_16_kwargs)
+    return DinoVisionTransformer(config=DinoV3Config.model_validate(vits_16_kwargs), dtype=jnp.bfloat16)
 
 def dinov3_vitl16():
     kwargs = dict(
@@ -487,4 +499,4 @@ def dinov3_vitl16():
         n_storage_tokens=4,                  # default is 0
         mask_k_bias=True                     # default is False
     )
-    return DinoVisionTransformer(**kwargs)
+    return DinoVisionTransformer(config=DinoV3Config.model_validate(kwargs), dtype=jnp.bfloat16)

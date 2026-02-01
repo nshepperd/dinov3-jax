@@ -1,28 +1,32 @@
-from typing import Union
-
+import equinox as eqx
 import jax.numpy as jnp
-from jaxtorch import Module, Context, init
+from jaxtyping import Array
+
+import eepynox.utils as eu
 
 
-class LayerScale(Module):
+class LayerScale(eqx.Module):
     """Layer-wise learnable scaling parameter."""
-    
+    gamma: Array
+    dim: int = eqx.field(static=True)
+    init_values: float = eqx.field(static=True)
+
     def __init__(
         self,
         dim: int,
-        init_values: Union[float, jnp.ndarray] = 1e-5,
-        inplace: bool = False,  # Ignored in JAX (no in-place operations)
-        device=None,  # Ignored in JAX
+        init_values: float = 1e-5,
+        dtype: jnp.dtype = jnp.float32,
     ):
         super().__init__()
         self.dim = dim
         self.init_values = init_values
-        
-        # Initialize gamma parameter
-        if isinstance(init_values, float):
-            self.gamma = init.const(jnp.full((dim,), init_values))
-        else:
-            self.gamma = init.const(init_values)
+        self.gamma= jnp.full((dim,), init_values, dtype=dtype)
     
-    def forward(self, cx: Context, x: jnp.ndarray) -> jnp.ndarray:
-        return x * cx[self.gamma]
+    def load_state_dict(self, state_dict: dict[str, Array], prefix: str = ""):
+        """Load state dict into the LayerScale module."""
+        assert state_dict[prefix + 'gamma'].shape == (self.dim,)
+        gamma = state_dict.pop(prefix + 'gamma')
+        return eu.replace(self, gamma=gamma)
+
+    def __call__(self, x: Array) -> Array:
+        return x * self.gamma

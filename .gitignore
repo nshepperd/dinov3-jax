@@ -3,5 +3,4 @@ __pycache__
 .venv
 .vscode
 dinov3
-jaxtorch
 docs

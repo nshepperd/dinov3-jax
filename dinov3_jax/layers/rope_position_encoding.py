@@ -1,17 +1,31 @@
 import math
-from typing import Literal, Optional, Tuple
+from typing import Literal, Optional
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jaxtorch import Module, Context, Param
+from jaxtyping import Array, Float, PRNGKeyArray
+
+import eepynox.utils as eu
 
 
-class RopePositionEmbedding(Module):
+class RopePositionEmbedding(eqx.Module):
     """
     RoPE positional embedding with no mixing of coordinates (axial) and no learnable weights.
     Supports two parametrizations: either using `base` or `min_period` and `max_period`.
     """
+    periods: Float[Array, "D_head//4"]
+
+    base: Optional[float] = eqx.field(static=True)
+    min_period: Optional[float] = eqx.field(static=True)
+    max_period: Optional[float] = eqx.field(static=True)
+    D_head: int = eqx.field(static=True)
+    normalize_coords: Literal["min", "max", "separate"] = eqx.field(static=True)
+    shift_coords: Optional[float] = eqx.field(static=True)
+    jitter_coords: Optional[float] = eqx.field(static=True)
+    rescale_coords: Optional[float] = eqx.field(static=True)
+    dtype: jnp.dtype = eqx.field(static=True)
     
     def __init__(
         self,
@@ -45,31 +59,22 @@ class RopePositionEmbedding(Module):
         self.rescale_coords = rescale_coords
         self.dtype = dtype or jnp.float32
         
-        # Create periods parameter (will be initialized in setup)
-        self.periods = Param((D_head // 4,))
-    
-    def setup(self, cx: Context):
-        super().setup(cx)
-        self._init_weights(cx)
-    
-    def _init_weights(self, cx: Context):
-        D_head = self.D_head
         if self.base is not None:
             periods = self.base ** (
-                2 * jnp.arange(D_head // 4, dtype=self.dtype) / (D_head // 2)
+                2 * jnp.arange(self.D_head // 4, dtype=self.dtype) / (self.D_head // 2)
             )
         else:
             base = self.max_period / self.min_period
-            exponents = jnp.linspace(0, 1, D_head // 4, dtype=self.dtype)
+            exponents = jnp.linspace(0, 1, self.D_head // 4, dtype=self.dtype)
             periods = base ** exponents
             periods = periods / base
             periods = periods * self.max_period
         
-        cx[self.periods] = periods
+        self.periods = periods
     
-    def forward(self, cx: Context, *, H: int, W: int) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    def __call__(self, H: int, W: int) -> tuple[Array, Array]:
         dtype = self.dtype
-        periods = cx[self.periods]
+        periods = self.periods
         
         # Prepare coords in range [0, 1]
         if self.normalize_coords == "max":
@@ -92,34 +97,34 @@ class RopePositionEmbedding(Module):
         coords = coords.reshape(-1, 2)  # [HW, 2]
         coords = 2.0 * coords - 1.0  # Shift range [0, 1] to [-1, +1]
         
-        # Apply coordinate transformations during training
-        if cx.mode == "train":
-            # Shift coords
-            if self.shift_coords is not None:
-                shift_hw = cx.random.uniform(
-                    shape=(2,),
-                    minval=-self.shift_coords,
-                    maxval=self.shift_coords
-                ).astype(dtype)
-                coords = coords + shift_hw[None, :]
+        # # Apply coordinate transformations during training
+        # if cx.mode == "train":
+        #     # Shift coords
+        #     if self.shift_coords is not None:
+        #         shift_hw = cx.random.uniform(
+        #             shape=(2,),
+        #             minval=-self.shift_coords,
+        #             maxval=self.shift_coords
+        #         ).astype(dtype)
+        #         coords = coords + shift_hw[None, :]
             
-            # Jitter coords
-            if self.jitter_coords is not None:
-                jitter_max = np.log(self.jitter_coords)
-                jitter_min = -jitter_max
-                jitter_hw = jnp.exp(
-                    cx.random.uniform(shape=(2,), minval=jitter_min, maxval=jitter_max)
-                ).astype(dtype)
-                coords = coords * jitter_hw[None, :]
+        #     # Jitter coords
+        #     if self.jitter_coords is not None:
+        #         jitter_max = np.log(self.jitter_coords)
+        #         jitter_min = -jitter_max
+        #         jitter_hw = jnp.exp(
+        #             cx.random.uniform(shape=(2,), minval=jitter_min, maxval=jitter_max)
+        #         ).astype(dtype)
+        #         coords = coords * jitter_hw[None, :]
             
-            # Rescale coords
-            if self.rescale_coords is not None:
-                rescale_max = np.log(self.rescale_coords)
-                rescale_min = -rescale_max
-                rescale_hw = jnp.exp(
-                    cx.random.uniform(shape=(1,), minval=rescale_min, maxval=rescale_max)
-                ).astype(dtype)
-                coords = coords * rescale_hw
+        #     # Rescale coords
+        #     if self.rescale_coords is not None:
+        #         rescale_max = np.log(self.rescale_coords)
+        #         rescale_min = -rescale_max
+        #         rescale_hw = jnp.exp(
+        #             cx.random.uniform(shape=(1,), minval=rescale_min, maxval=rescale_max)
+        #         ).astype(dtype)
+        #         coords = coords * rescale_hw
         
         # Prepare angles and sin/cos
         angles = 2 * math.pi * coords[:, :, None] / periods[None, None, :]  # [HW, 2, D//4]

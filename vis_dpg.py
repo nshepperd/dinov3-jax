@@ -32,7 +32,7 @@ IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 
 # Paths - adjust these
-IMAGE_PATH = "medium.jpg"
+IMAGE_PATH = ""
 MODEL_PATH = "/data/models/dinov3-vitl16-pretrain-lvd1689m"
 
 
@@ -229,34 +229,41 @@ class SimilarityVisualizer:
 
 
 def main():
-    print("Loading image...")
-    image, image_tensor = load_and_preprocess_image(IMAGE_PATH, IMAGE_SIZE, PATCH_SIZE, FEATURE_SCALE)
-    print(f"Display size: {image.size}")
-    print(f"Feature tensor shape: {image_tensor.shape}")
-
     print("Loading model...")
     model = load_dinov3(MODEL_PATH, dtype=jnp.float32)
 
-    print("Extracting features...")
-    features = extract_features(model, image_tensor, embed_dim=model.config.hidden_size)
-    features_np = np.array(features)
-    print(f"Feature grid: {features_np.shape} ({features_np.shape[1]}x{features_np.shape[0]} patches)")
+    # Try loading initial image (optional)
+    vis = None
+    img_w, img_h = 512, 512  # default placeholder size
+    if IMAGE_PATH and os.path.isfile(IMAGE_PATH):
+        print("Loading image...")
+        image, image_tensor = load_and_preprocess_image(IMAGE_PATH, IMAGE_SIZE, PATCH_SIZE, FEATURE_SCALE)
+        print(f"Display size: {image.size}")
+        print(f"Feature tensor shape: {image_tensor.shape}")
 
-    # Create visualizer
-    vis = SimilarityVisualizer(image, features_np)
+        print("Extracting features...")
+        features = extract_features(model, image_tensor, embed_dim=model.config.hidden_size)
+        features_np = np.array(features)
+        print(f"Feature grid: {features_np.shape} ({features_np.shape[1]}x{features_np.shape[0]} patches)")
+        vis = SimilarityVisualizer(image, features_np)
+        img_w, img_h = image.size
+    else:
+        print("No starting image — paste one with Ctrl+V")
 
     # Mutable state for closures (updated on paste)
-    state = {'vis': vis, 'img_w': image.size[0], 'img_h': image.size[1], 'tex_id': 0}
+    state = {'vis': vis, 'img_w': img_w, 'img_h': img_h, 'tex_id': 0}
 
     # Setup DearPyGui
     dpg.create_context()
 
-    img_w, img_h = state['img_w'], state['img_h']
-
     # Create texture
     with dpg.texture_registry(tag="tex_registry"):
-        # Initial render
-        initial_frame, stats = vis.render_frame(vis.current_row, vis.current_col)
+        if vis:
+            initial_frame, stats = vis.render_frame(vis.current_row, vis.current_col)
+        else:
+            # Grey placeholder
+            initial_frame = np.full(img_w * img_h * 4, 0.2, dtype=np.float32)
+            initial_frame[3::4] = 1.0  # alpha
         dpg.add_raw_texture(
             width=img_w,
             height=img_h,
@@ -267,6 +274,8 @@ def main():
 
     def update_display():
         v = state['vis']
+        if v is None:
+            return
         frame, stats = v.render_frame(v.current_row, v.current_col)
         dpg.set_value(f"main_texture_{state['tex_id']}", frame)
         dpg.set_value("stats_text",
@@ -275,7 +284,7 @@ def main():
 
     def handle_mouse_input():
         """Update if left mouse button is down and mouse is over the plot."""
-        if not dpg.is_mouse_button_down(0):  # 0 = left button
+        if state['vis'] is None or not dpg.is_mouse_button_down(0):
             return
 
         mouse_pos = dpg.get_plot_mouse_pos()
@@ -322,7 +331,8 @@ def main():
         feats_np = np.array(feats)
 
         new_vis = SimilarityVisualizer(img, feats_np)
-        new_vis.alpha = state['vis'].alpha  # preserve alpha setting
+        if state['vis'] is not None:
+            new_vis.alpha = state['vis'].alpha  # preserve alpha setting
         new_w, new_h = img.size
         state['vis'] = new_vis
         state['img_w'] = new_w
@@ -402,7 +412,10 @@ def main():
                 )
 
     # Initial stats update
-    update_display()
+    if vis:
+        update_display()
+    else:
+        dpg.set_value("stats_text", "Paste an image with Ctrl+V")
 
     dpg.create_viewport(title="DINOv3 Feature Similarity Visualizer", width=img_w + 50, height=img_h + 150)
     dpg.setup_dearpygui()

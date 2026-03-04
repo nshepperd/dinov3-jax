@@ -4,8 +4,8 @@ import equinox as eqx
 import jax.numpy as jnp
 from jaxtyping import Array
 
-import eepynox.utils as eu
-from eepynox.nn.conv2d import Conv2d
+import dinov3_jax.eepynox.utils as eu
+from dinov3_jax.eepynox.nn.conv2d import Conv2d
 from dinov3_jax.config import Dinov3VitConfig
 
 

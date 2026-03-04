@@ -4,7 +4,7 @@ import equinox as eqx
 import jax.numpy as jnp
 from jaxtyping import Array
 
-import eepynox.utils as eu
+import dinov3_jax.eepynox.utils as eu
 
 
 class Dinov3VitLayerScale(eqx.Module):

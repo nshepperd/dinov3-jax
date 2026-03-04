@@ -5,7 +5,7 @@ from typing import Callable, TypeVar, Any
 
 import torch
 import equinox as eqx
-import eepynox.utils as eu
+import dinov3_jax.eepynox.utils as eu
 import jax
 
 def collect_layers(model: torch.nn.Module, *args, **kwargs) -> tuple[Any, dict[str, tuple[tuple[Any,...], Any]]]:

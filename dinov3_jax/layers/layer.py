@@ -3,7 +3,7 @@ from __future__ import annotations
 import equinox as eqx
 from jaxtyping import Array
 
-import eepynox.utils as eu
+import dinov3_jax.eepynox.utils as eu
 from dinov3_jax.config import Dinov3VitConfig
 from dinov3_jax.layers.rms_norm import LayerNorm
 from dinov3_jax.layers.attention import Dinov3VitAttention

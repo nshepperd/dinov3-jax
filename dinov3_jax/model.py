@@ -7,7 +7,7 @@ import equinox as eqx
 import jax.numpy as jnp
 from jaxtyping import Array
 
-import eepynox.utils as eu
+import dinov3_jax.eepynox.utils as eu
 from dinov3_jax.config import Dinov3VitConfig
 from dinov3_jax.layers.embeddings import Dinov3VitEmbeddings
 from dinov3_jax.layers.rope import Dinov3VitRopePositionEmbedding

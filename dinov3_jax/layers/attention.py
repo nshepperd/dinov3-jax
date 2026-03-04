@@ -7,8 +7,8 @@ import equinox as eqx
 import jax.numpy as jnp
 from jaxtyping import Array
 
-import eepynox.utils as eu
-from eepynox.nn.linear import Linear
+import dinov3_jax.eepynox.utils as eu
+from dinov3_jax.eepynox.nn.linear import Linear
 from dinov3_jax.config import Dinov3VitConfig
 from dinov3_jax.layers.rope import apply_rotary_pos_emb
 

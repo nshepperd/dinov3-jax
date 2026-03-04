@@ -9,7 +9,7 @@ import lovely_jax as lj
 import lovely_tensors as lt
 
 
-from eepynox.debug import maybe_debugpy_postmortem
+from dinov3_jax.eepynox.debug import maybe_debugpy_postmortem
 
 jax.config.update("jax_default_matmul_precision", "highest")
 

@@ -80,11 +80,17 @@ def get_clipboard_text():
         ['xclip', '-selection', 'clipboard', '-o'],
     ]:
         try:
+            print(f"[clipboard] trying text: {' '.join(cmd)}")
             result = subprocess.run(cmd, capture_output=True, timeout=5)
+            print(f"[clipboard]   rc={result.returncode}, stdout={len(result.stdout)}B, stderr={result.stderr.decode(errors='ignore').strip()!r}")
             if result.returncode == 0 and result.stdout:
-                return result.stdout.decode('utf-8', errors='ignore').strip()
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            pass
+                text = result.stdout.decode('utf-8', errors='ignore').strip()
+                print(f"[clipboard]   got text: {text[:200]!r}")
+                return text
+        except FileNotFoundError:
+            print(f"[clipboard]   {cmd[0]} not found")
+        except subprocess.TimeoutExpired:
+            print(f"[clipboard]   timeout")
     return None
 
 
@@ -99,21 +105,38 @@ def get_clipboard_image():
         ['xclip', '-selection', 'clipboard', '-t', 'image/png', '-o'],
     ]:
         try:
+            print(f"[clipboard] trying image: {' '.join(cmd)}")
             result = subprocess.run(cmd, capture_output=True, timeout=5)
+            print(f"[clipboard]   rc={result.returncode}, stdout={len(result.stdout)}B, stderr={result.stderr.decode(errors='ignore').strip()!r}")
             if result.returncode == 0 and result.stdout:
-                return Image.open(io.BytesIO(result.stdout)).convert("RGB")
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            pass
+                try:
+                    img = Image.open(io.BytesIO(result.stdout)).convert("RGB")
+                    print(f"[clipboard]   got image: {img.size}")
+                    return img
+                except Exception as e:
+                    print(f"[clipboard]   failed to decode image: {e}")
+        except FileNotFoundError:
+            print(f"[clipboard]   {cmd[0]} not found")
+        except subprocess.TimeoutExpired:
+            print(f"[clipboard]   timeout")
 
     # Try clipboard text as URL
+    print("[clipboard] no image data, trying text as URL...")
     text = get_clipboard_text()
     if text and re.match(r'https?://', text):
+        print(f"[clipboard] fetching URL: {text[:200]}")
         try:
             req = urllib.request.Request(text, headers={'User-Agent': 'Mozilla/5.0'})
             with urllib.request.urlopen(req, timeout=15) as resp:
-                return Image.open(io.BytesIO(resp.read())).convert("RGB")
+                data = resp.read()
+                print(f"[clipboard]   got {len(data)}B, content-type={resp.headers.get('Content-Type')}")
+                img = Image.open(io.BytesIO(data)).convert("RGB")
+                print(f"[clipboard]   decoded image: {img.size}")
+                return img
         except Exception as e:
-            print(f"Failed to fetch image from URL: {e}")
+            print(f"[clipboard]   failed to fetch/decode URL: {e}")
+    elif text:
+        print(f"[clipboard] text is not a URL: {text[:200]!r}")
 
     return None
 

@@ -2,11 +2,15 @@
 Interactive DINOv3 Feature Similarity Visualizer using DearPyGui
 
 Click anywhere on the image to see which patches have similar features.
+Ctrl+V to paste an image from clipboard.
 """
 
 import os
 os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "cuda_async"
 os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.25"
+
+import io
+import subprocess
 
 import jax
 import jax.numpy as jnp
@@ -26,16 +30,15 @@ IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 
 # Paths - adjust these
-IMAGE_PATH = "data/2024-11-01_15.10.05.png"
+IMAGE_PATH = "medium.jpg"
 MODEL_PATH = "/data/models/dinov3-vitl16-pretrain-lvd1689m"
 
 
-def load_and_preprocess_image(path: str, image_size: int, patch_size: int, feature_scale: float = 1.0):
-    """Load and preprocess image for DINOv3.
+def preprocess_image(image: Image.Image, image_size: int, patch_size: int, feature_scale: float = 1.0):
+    """Preprocess a PIL image for DINOv3.
 
     Returns display image and feature extraction tensor (possibly at different resolution).
     """
-    image = Image.open(path).convert("RGB")
     w, h = image.size
 
     # Display image: sized to image_size height
@@ -60,6 +63,39 @@ def load_and_preprocess_image(path: str, image_size: int, patch_size: int, featu
     img_tensor = jnp.array(img_array[np.newaxis, ...])
 
     return image_display, img_tensor
+
+
+def load_and_preprocess_image(path: str, image_size: int, patch_size: int, feature_scale: float = 1.0):
+    """Load image from file and preprocess for DINOv3."""
+    image = Image.open(path).convert("RGB")
+    return preprocess_image(image, image_size, patch_size, feature_scale)
+
+
+def get_clipboard_image():
+    """Get image from system clipboard (supports Wayland and X11)."""
+    # Try wl-paste (Wayland)
+    try:
+        result = subprocess.run(
+            ['wl-paste', '--type', 'image/png'],
+            capture_output=True, timeout=5,
+        )
+        if result.returncode == 0 and result.stdout:
+            return Image.open(io.BytesIO(result.stdout)).convert("RGB")
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+    # Try xclip (X11)
+    try:
+        result = subprocess.run(
+            ['xclip', '-selection', 'clipboard', '-t', 'image/png', '-o'],
+            capture_output=True, timeout=5,
+        )
+        if result.returncode == 0 and result.stdout:
+            return Image.open(io.BytesIO(result.stdout)).convert("RGB")
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+    return None
 
 
 def extract_features(model, image_tensor, embed_dim):
@@ -189,13 +225,16 @@ def main():
     # Create visualizer
     vis = SimilarityVisualizer(image, features_np)
 
+    # Mutable state for closures (updated on paste)
+    state = {'vis': vis, 'img_w': image.size[0], 'img_h': image.size[1], 'tex_id': 0}
+
     # Setup DearPyGui
     dpg.create_context()
 
-    img_w, img_h = image.size
+    img_w, img_h = state['img_w'], state['img_h']
 
     # Create texture
-    with dpg.texture_registry():
+    with dpg.texture_registry(tag="tex_registry"):
         # Initial render
         initial_frame, stats = vis.render_frame(vis.current_row, vis.current_col)
         dpg.add_raw_texture(
@@ -203,14 +242,15 @@ def main():
             height=img_h,
             default_value=initial_frame,
             format=dpg.mvFormat_Float_rgba,
-            tag="main_texture"
+            tag=f"main_texture_{state['tex_id']}"
         )
 
     def update_display():
-        frame, stats = vis.render_frame(vis.current_row, vis.current_col)
-        dpg.set_value("main_texture", frame)
+        v = state['vis']
+        frame, stats = v.render_frame(v.current_row, v.current_col)
+        dpg.set_value(f"main_texture_{state['tex_id']}", frame)
         dpg.set_value("stats_text",
-            f"Patch: ({vis.current_row}, {vis.current_col}) | "
+            f"Patch: ({v.current_row}, {v.current_col}) | "
             f"Similarity: [{stats[0]:.3f}, {stats[1]:.3f}] mean={stats[2]:.3f}")
 
     def handle_mouse_input():
@@ -220,32 +260,92 @@ def main():
 
         mouse_pos = dpg.get_plot_mouse_pos()
         x, y = mouse_pos
+        v = state['vis']
+        iw, ih = state['img_w'], state['img_h']
 
         # Check if mouse is within plot bounds
-        if x < 0 or x >= img_w or y < 0 or y >= img_h:
+        if x < 0 or x >= iw or y < 0 or y >= ih:
             return
 
         # Convert to patch coordinates using feature grid dimensions
-        col = int(x / img_w * vis.W)
-        row = int((img_h - y) / img_h * vis.H)
+        col = int(x / iw * v.W)
+        row = int((ih - y) / ih * v.H)
 
         # Clamp to valid range
-        row = max(0, min(vis.H - 1, row))
-        col = max(0, min(vis.W - 1, col))
+        row = max(0, min(v.H - 1, row))
+        col = max(0, min(v.W - 1, col))
 
         # Only update if position changed
-        if row != vis.current_row or col != vis.current_col:
-            vis.current_row = row
-            vis.current_col = col
+        if row != v.current_row or col != v.current_col:
+            v.current_row = row
+            v.current_col = col
             update_display()
 
     def on_alpha_change(sender, app_data):
-        vis.alpha = app_data
+        state['vis'].alpha = app_data
         update_display()
+
+    def handle_paste():
+        dpg.set_value("stats_text", "Reading clipboard...")
+        dpg.render_dearpygui_frame()
+
+        clip_img = get_clipboard_image()
+        if clip_img is None:
+            dpg.set_value("stats_text", "No image found in clipboard")
+            return
+
+        dpg.set_value("stats_text", f"Processing pasted image ({clip_img.size[0]}x{clip_img.size[1]})...")
+        dpg.render_dearpygui_frame()
+
+        img, tensor = preprocess_image(clip_img, IMAGE_SIZE, PATCH_SIZE, FEATURE_SCALE)
+        feats = extract_features(model, tensor, embed_dim=model.config.hidden_size)
+        feats_np = np.array(feats)
+
+        new_vis = SimilarityVisualizer(img, feats_np)
+        new_vis.alpha = state['vis'].alpha  # preserve alpha setting
+        new_w, new_h = img.size
+        state['vis'] = new_vis
+        state['img_w'] = new_w
+        state['img_h'] = new_h
+
+        # Recreate texture with new dimensions (DPG doesn't release aliases on delete)
+        old_tag = f"main_texture_{state['tex_id']}"
+        state['tex_id'] += 1
+        new_tag = f"main_texture_{state['tex_id']}"
+
+        dpg.delete_item("image_series")
+        dpg.delete_item(old_tag)
+
+        initial_frame, _ = new_vis.render_frame(new_vis.current_row, new_vis.current_col)
+        dpg.add_raw_texture(
+            width=new_w,
+            height=new_h,
+            default_value=initial_frame,
+            format=dpg.mvFormat_Float_rgba,
+            tag=new_tag,
+            parent="tex_registry",
+        )
+        dpg.add_image_series(
+            new_tag,
+            bounds_min=[0, 0],
+            bounds_max=[new_w, new_h],
+            tag="image_series",
+            parent="y_axis",
+        )
+
+        # Update plot layout for new image size
+        dpg.set_axis_limits("x_axis", 0, new_w)
+        dpg.set_axis_limits("y_axis", new_h, 0)
+        dpg.configure_item("main_plot", width=new_w, height=new_h)
+        dpg.set_viewport_width(new_w + 50)
+        dpg.set_viewport_height(new_h + 150)
+
+        update_display()
+        print(f"Pasted image: {clip_img.size} -> display {new_w}x{new_h}, features {feats_np.shape}")
 
     # Create window
     with dpg.window(label="DINOv3 Feature Similarity", tag="main_window"):
-        dpg.add_text("Click on the image to explore feature similarities", color=(200, 200, 200))
+        dpg.add_text("Click on image to explore | Ctrl+V to paste image", color=(200, 200, 200))
         dpg.add_text("", tag="stats_text")
 
         dpg.add_slider_float(
@@ -275,7 +375,7 @@ def main():
             with dpg.plot_axis(dpg.mvYAxis, no_tick_labels=True, no_tick_marks=True, tag="y_axis"):
                 dpg.set_axis_limits("y_axis", img_h, 0)  # Flip Y axis
                 dpg.add_image_series(
-                    "main_texture",
+                    f"main_texture_{state['tex_id']}",
                     bounds_min=[0, 0],
                     bounds_max=[img_w, img_h],
                     tag="image_series"
@@ -289,9 +389,18 @@ def main():
     dpg.show_viewport()
     dpg.set_primary_window("main_window", True)
 
-    # Manual render loop to check mouse state each frame
+    # Manual render loop to check mouse state and keyboard each frame
+    v_was_down = False
     while dpg.is_dearpygui_running():
         handle_mouse_input()
+
+        # Detect Ctrl+V keypress (edge-triggered)
+        v_is_down = dpg.is_key_down(dpg.mvKey_V)
+        if v_is_down and not v_was_down:
+            if dpg.is_key_down(dpg.mvKey_LControl) or dpg.is_key_down(dpg.mvKey_RControl):
+                handle_paste()
+        v_was_down = v_is_down
+
         dpg.render_dearpygui_frame()
     dpg.destroy_context()
 

@@ -26,7 +26,7 @@ from dinov3_jax import load_dinov3
 # Configuration
 PATCH_SIZE = 16
 IMAGE_SIZE = 768  # Display size (height)
-FEATURE_SCALE = 3.0  # Scale factor for feature extraction input (2.0 = 2x resolution feature map)
+FEATURE_SCALE = 4.0  # Scale factor for feature extraction input (2.0 = 2x resolution feature map)
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
@@ -179,7 +179,7 @@ class SimilarityVisualizer:
 
         # Precompute normalized features for fast similarity
         features_flat = features.reshape(-1, self.C)
-        self.features_norm = features_flat / (np.linalg.norm(features_flat, axis=1, keepdims=True) + 1e-8)
+        self.features_norm = (features_flat - features_flat.mean(axis=1, keepdims=True)) / (np.linalg.norm(features_flat, axis=1, keepdims=True) + 1e-8)
 
         # JIT compile similarity computation
         @jax.jit

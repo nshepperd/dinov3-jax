@@ -10,7 +10,9 @@ os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "cuda_async"
 os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.25"
 
 import io
+import re
 import subprocess
+import urllib.request
 
 import jax
 import jax.numpy as jnp
@@ -71,29 +73,47 @@ def load_and_preprocess_image(path: str, image_size: int, patch_size: int, featu
     return preprocess_image(image, image_size, patch_size, feature_scale)
 
 
-def get_clipboard_image():
-    """Get image from system clipboard (supports Wayland and X11)."""
-    # Try wl-paste (Wayland)
-    try:
-        result = subprocess.run(
-            ['wl-paste', '--type', 'image/png'],
-            capture_output=True, timeout=5,
-        )
-        if result.returncode == 0 and result.stdout:
-            return Image.open(io.BytesIO(result.stdout)).convert("RGB")
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+def get_clipboard_text():
+    """Get text from system clipboard."""
+    for cmd in [
+        ['wl-paste', '--no-newline'],
+        ['xclip', '-selection', 'clipboard', '-o'],
+    ]:
+        try:
+            result = subprocess.run(cmd, capture_output=True, timeout=5)
+            if result.returncode == 0 and result.stdout:
+                return result.stdout.decode('utf-8', errors='ignore').strip()
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+    return None
 
-    # Try xclip (X11)
-    try:
-        result = subprocess.run(
-            ['xclip', '-selection', 'clipboard', '-t', 'image/png', '-o'],
-            capture_output=True, timeout=5,
-        )
-        if result.returncode == 0 and result.stdout:
-            return Image.open(io.BytesIO(result.stdout)).convert("RGB")
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+
+def get_clipboard_image():
+    """Get image from system clipboard (supports Wayland and X11).
+
+    Tries image data first, then falls back to checking if clipboard text is a URL.
+    """
+    # Try image data from clipboard
+    for cmd in [
+        ['wl-paste', '--type', 'image/png'],
+        ['xclip', '-selection', 'clipboard', '-t', 'image/png', '-o'],
+    ]:
+        try:
+            result = subprocess.run(cmd, capture_output=True, timeout=5)
+            if result.returncode == 0 and result.stdout:
+                return Image.open(io.BytesIO(result.stdout)).convert("RGB")
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+
+    # Try clipboard text as URL
+    text = get_clipboard_text()
+    if text and re.match(r'https?://', text):
+        try:
+            req = urllib.request.Request(text, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                return Image.open(io.BytesIO(resp.read())).convert("RGB")
+        except Exception as e:
+            print(f"Failed to fetch image from URL: {e}")
 
     return None
 

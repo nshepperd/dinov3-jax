@@ -6,6 +6,7 @@ Ctrl+V to paste an image from clipboard.
 """
 
 import os
+
 os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "cuda_async"
 os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.25"
 
@@ -13,15 +14,18 @@ import io
 import re
 import subprocess
 import urllib.request
+from dataclasses import dataclass
 
+import dearpygui.dearpygui as dpg
 import jax
 import jax.numpy as jnp
 import numpy as np
+from jaxtyping import Array
 from PIL import Image
-import dearpygui.dearpygui as dpg
 
 # JAX DINOv3 imports
-from dinov3_jax import load_dinov3
+from dinov3_jax import Dinov3VitModel, load_dinov3
+from dinov3_jax.utils.pjit import pjit
 
 # Configuration
 PATCH_SIZE = 16
@@ -145,8 +149,8 @@ def extract_features(model, image_tensor, embed_dim):
     """Extract features from the model."""
     n_layers = len(model.layer)
 
-    @jax.jit
-    def fwd(model, image_tensor):
+    @pjit
+    def fwd(model: Dinov3VitModel, image_tensor: Array) -> Array:
         features = model.get_intermediate_layers(
             image_tensor.astype(jnp.float32),
             n=n_layers,
@@ -188,8 +192,17 @@ class SimilarityVisualizer:
             similarities = features_norm @ target_feature
             return similarities
 
+        @jax.jit
+        def compute_similarity_vec(features_norm, target_vec):
+            target_vec = target_vec - target_vec.mean()
+            target_vec = target_vec / (jnp.linalg.norm(target_vec) + 1e-8)
+            similarities = features_norm @ target_vec
+            return similarities
+
         self.compute_similarity = compute_similarity
+        self.compute_similarity_vec = compute_similarity_vec
         self.features_norm_jax = jnp.array(self.features_norm)
+        self.features_jax = jnp.array(features.reshape(-1, self.C))
 
         # Convert original image to float array for blending
         self.image_array = np.array(image).astype(np.float32) / 255.0
@@ -198,6 +211,7 @@ class SimilarityVisualizer:
         self.current_row = self.H // 2
         self.current_col = self.W // 2
         self.alpha = 0.5
+        self.painted_tiles = set()  # set of (row, col) for paint mode
 
     def get_similarity_map(self, row: int, col: int) -> np.ndarray:
         """Compute similarity map for a given patch."""
@@ -205,10 +219,20 @@ class SimilarityVisualizer:
         similarities = self.compute_similarity(self.features_norm_jax, target_idx)
         return np.array(similarities).reshape(self.H, self.W)
 
+    def get_similarity_map_painted(self) -> np.ndarray:
+        """Compute similarity map for averaged painted tiles."""
+        indices = [r * self.W + c for r, c in self.painted_tiles]
+        avg_feature = self.features_jax[jnp.array(indices)].mean(axis=0)
+        similarities = self.compute_similarity_vec(self.features_norm_jax, avg_feature)
+        return np.array(similarities).reshape(self.H, self.W)
+
     def render_frame(self, row: int, col: int) -> tuple[np.ndarray, tuple[float, float, float]]:
         """Render the blended visualization."""
         # Compute similarity
-        sim_map = self.get_similarity_map(row, col)
+        if self.painted_tiles:
+            sim_map = self.get_similarity_map_painted()
+        else:
+            sim_map = self.get_similarity_map(row, col)
 
         # Normalize to [0, 1] for colormap
         sim_min, sim_max = sim_map.min(), sim_map.max()
@@ -224,25 +248,52 @@ class SimilarityVisualizer:
         # Blend with original
         blended = self.image_array * (1 - self.alpha) + sim_array * self.alpha
 
-        # Draw crosshair at target location (map patch coords to display pixels)
         px_per_patch_x = self.img_w / self.W
         px_per_patch_y = self.img_h / self.H
-        cx = int(col * px_per_patch_x + px_per_patch_x / 2)
-        cy = int(row * px_per_patch_y + px_per_patch_y / 2)
-        cross_size = 10
-        cross_thickness = 2
 
-        # Red crosshair
-        for dy in range(-cross_size, cross_size + 1):
-            for dx in range(-cross_thickness // 2, cross_thickness // 2 + 1):
-                py, px = cy + dy, cx + dx
-                if 0 <= py < self.img_h and 0 <= px < self.img_w:
-                    blended[py, px] = [1.0, 0.0, 0.0]
-        for dx in range(-cross_size, cross_size + 1):
-            for dy in range(-cross_thickness // 2, cross_thickness // 2 + 1):
-                py, px = cy + dy, cx + dx
-                if 0 <= py < self.img_h and 0 <= px < self.img_w:
-                    blended[py, px] = [1.0, 0.0, 0.0]
+        if self.painted_tiles:
+            # Draw red outline on each painted tile
+            for pr, pc in self.painted_tiles:
+                x0 = int(pc * px_per_patch_x)
+                y0 = int(pr * px_per_patch_y)
+                x1 = int((pc + 1) * px_per_patch_x)
+                y1 = int((pr + 1) * px_per_patch_y)
+                # Top and bottom edges
+                for px_ in range(max(0, x0), min(self.img_w, x1)):
+                    for t in range(2):
+                        py_ = y0 + t
+                        if 0 <= py_ < self.img_h:
+                            blended[py_, px_] = [1.0, 0.0, 0.0]
+                        py_ = y1 - 1 - t
+                        if 0 <= py_ < self.img_h:
+                            blended[py_, px_] = [1.0, 0.0, 0.0]
+                # Left and right edges
+                for py_ in range(max(0, y0), min(self.img_h, y1)):
+                    for t in range(2):
+                        px_ = x0 + t
+                        if 0 <= px_ < self.img_w:
+                            blended[py_, px_] = [1.0, 0.0, 0.0]
+                        px_ = x1 - 1 - t
+                        if 0 <= px_ < self.img_w:
+                            blended[py_, px_] = [1.0, 0.0, 0.0]
+        else:
+            # Draw crosshair at target location
+            cx = int(col * px_per_patch_x + px_per_patch_x / 2)
+            cy = int(row * px_per_patch_y + px_per_patch_y / 2)
+            cross_size = 10
+            cross_thickness = 2
+
+            # Red crosshair
+            for dy in range(-cross_size, cross_size + 1):
+                for dx in range(-cross_thickness // 2, cross_thickness // 2 + 1):
+                    py, px = cy + dy, cx + dx
+                    if 0 <= py < self.img_h and 0 <= px < self.img_w:
+                        blended[py, px] = [1.0, 0.0, 0.0]
+            for dx in range(-cross_size, cross_size + 1):
+                for dy in range(-cross_thickness // 2, cross_thickness // 2 + 1):
+                    py, px = cy + dy, cx + dx
+                    if 0 <= py < self.img_h and 0 <= px < self.img_w:
+                        blended[py, px] = [1.0, 0.0, 0.0]
 
         # Add alpha channel for DearPyGui (RGBA)
         rgba = np.ones((self.img_h, self.img_w, 4), dtype=np.float32)
@@ -273,11 +324,18 @@ def main():
     else:
         print("No starting image — paste one with Ctrl+V")
 
-    # Mutable state for closures (updated on paste)
+    @dataclass
+    class State:
+        vis: SimilarityVisualizer | None
+        img_w: int
+        img_h: int
+        tex_id: int = 0
+        vp_w: int = 0
+        vp_h: int = 0
+
     CONTROLS_PAD_Y = 100  # vertical space for controls above plot
     CONTROLS_PAD_X = 30   # horizontal padding
-    state = {'vis': vis, 'img_w': img_w, 'img_h': img_h, 'tex_id': 0,
-             'vp_w': 0, 'vp_h': 0}
+    state = State(vis=vis, img_w=img_w, img_h=img_h)
 
     # Setup DearPyGui
     dpg.create_context()
@@ -295,29 +353,34 @@ def main():
             height=img_h,
             default_value=initial_frame,
             format=dpg.mvFormat_Float_rgba,
-            tag=f"main_texture_{state['tex_id']}"
+            tag=f"main_texture_{state.tex_id}"
         )
 
     def update_display():
-        v = state['vis']
+        v = state.vis
         if v is None:
             return
         frame, stats = v.render_frame(v.current_row, v.current_col)
-        dpg.set_value(f"main_texture_{state['tex_id']}", frame)
-        dpg.set_value("stats_text",
-            f"Patch: ({v.current_row}, {v.current_col}) | "
-            f"Similarity: [{stats[0]:.3f}, {stats[1]:.3f}] mean={stats[2]:.3f}")
+        dpg.set_value(f"main_texture_{state.tex_id}", frame)
+        if v.painted_tiles:
+            dpg.set_value("stats_text",
+                f"Paint: {len(v.painted_tiles)} tiles | "
+                f"Similarity: [{stats[0]:.3f}, {stats[1]:.3f}] mean={stats[2]:.3f}")
+        else:
+            dpg.set_value("stats_text",
+                f"Patch: ({v.current_row}, {v.current_col}) | "
+                f"Similarity: [{stats[0]:.3f}, {stats[1]:.3f}] mean={stats[2]:.3f}")
 
     def resize_plot_to_fit():
         """Resize the plot to fit the current viewport, preserving aspect ratio."""
         vp_w = dpg.get_viewport_client_width()
         vp_h = dpg.get_viewport_client_height()
-        if vp_w == state['vp_w'] and vp_h == state['vp_h']:
+        if vp_w == state.vp_w and vp_h == state.vp_h:
             return
-        state['vp_w'] = vp_w
-        state['vp_h'] = vp_h
+        state.vp_w = vp_w
+        state.vp_h = vp_h
 
-        iw, ih = state['img_w'], state['img_h']
+        iw, ih = state.img_w, state.img_h
         if iw == 0 or ih == 0:
             return
 
@@ -335,14 +398,18 @@ def main():
         dpg.configure_item("main_plot", width=plot_w, height=plot_h)
 
     def handle_mouse_input():
-        """Update if left mouse button is down and mouse is over the plot."""
-        if state['vis'] is None or not dpg.is_mouse_button_down(0):
+        """Update if left mouse button is down and mouse is over the plot.
+
+        Ctrl+drag: paint tiles (features averaged for similarity target).
+        Drag without Ctrl: clear paint buffer, use single tile as target.
+        """
+        if state.vis is None or not dpg.is_mouse_button_down(0):
             return
 
         mouse_pos = dpg.get_plot_mouse_pos()
         x, y = mouse_pos
-        v = state['vis']
-        iw, ih = state['img_w'], state['img_h']
+        v = state.vis
+        iw, ih = state.img_w, state.img_h
 
         # Check if mouse is within plot bounds
         if x < 0 or x >= iw or y < 0 or y >= ih:
@@ -356,15 +423,27 @@ def main():
         row = max(0, min(v.H - 1, row))
         col = max(0, min(v.W - 1, col))
 
-        # Only update if position changed
-        if row != v.current_row or col != v.current_col:
-            v.current_row = row
-            v.current_col = col
+        ctrl_held = dpg.is_key_down(dpg.mvKey_LControl) or dpg.is_key_down(dpg.mvKey_RControl)
+
+        if ctrl_held:
+            # Paint mode: add tile to paint buffer
+            tile = (row, col)
+            if tile not in v.painted_tiles:
+                v.painted_tiles.add(tile)
+                update_display()
+        else:
+            # Normal mode: clear paint buffer, set single target
+            if v.painted_tiles:
+                v.painted_tiles.clear()
+            if row != v.current_row or col != v.current_col:
+                v.current_row = row
+                v.current_col = col
             update_display()
 
     def on_alpha_change(sender, app_data):
-        state['vis'].alpha = app_data
-        update_display()
+        if state.vis is not None:
+            state.vis.alpha = app_data
+            update_display()
 
     def handle_paste():
         dpg.set_value("stats_text", "Reading clipboard...")
@@ -383,17 +462,17 @@ def main():
         feats_np = np.array(feats)
 
         new_vis = SimilarityVisualizer(img, feats_np)
-        if state['vis'] is not None:
-            new_vis.alpha = state['vis'].alpha  # preserve alpha setting
+        if state.vis is not None:
+            new_vis.alpha = state.vis.alpha  # preserve alpha setting
         new_w, new_h = img.size
-        state['vis'] = new_vis
-        state['img_w'] = new_w
-        state['img_h'] = new_h
+        state.vis = new_vis
+        state.img_w = new_w
+        state.img_h = new_h
 
         # Recreate texture with new dimensions (DPG doesn't release aliases on delete)
-        old_tag = f"main_texture_{state['tex_id']}"
-        state['tex_id'] += 1
-        new_tag = f"main_texture_{state['tex_id']}"
+        old_tag = f"main_texture_{state.tex_id}"
+        state.tex_id += 1
+        new_tag = f"main_texture_{state.tex_id}"
 
         dpg.delete_item("image_series")
         dpg.delete_item(old_tag)
@@ -420,15 +499,15 @@ def main():
         dpg.set_axis_limits("y_axis", new_h, 0)
 
         # Force resize recalculation on next frame
-        state['vp_w'] = 0
-        state['vp_h'] = 0
+        state.vp_w = 0
+        state.vp_h = 0
 
         update_display()
         print(f"Pasted image: {clip_img.size} -> display {new_w}x{new_h}, features {feats_np.shape}")
 
     # Create window
     with dpg.window(label="DINOv3 Feature Similarity", tag="main_window"):
-        dpg.add_text("Click on image to explore | Ctrl+V to paste image", color=(200, 200, 200))
+        dpg.add_text("Click to explore | Ctrl+Click to paint tiles | Ctrl+V to paste", color=(200, 200, 200))
         dpg.add_text("", tag="stats_text")
 
         dpg.add_slider_float(
@@ -458,7 +537,7 @@ def main():
             with dpg.plot_axis(dpg.mvYAxis, no_tick_labels=True, no_tick_marks=True, tag="y_axis"):
                 dpg.set_axis_limits("y_axis", img_h, 0)  # Flip Y axis
                 dpg.add_image_series(
-                    f"main_texture_{state['tex_id']}",
+                    f"main_texture_{state.tex_id}",
                     bounds_min=[0, 0],
                     bounds_max=[img_w, img_h],
                     tag="image_series"

@@ -1,4 +1,6 @@
 from __future__ import annotations
+from dinov3_jax.utils.pjit import pjit
+import jax
 
 from dataclasses import dataclass
 from typing import Sequence
@@ -15,6 +17,7 @@ from dinov3_jax.layers.layer import Dinov3VitLayer
 from dinov3_jax.layers.rms_norm import LayerNorm
 
 
+@jax.tree_util.register_dataclass
 @dataclass
 class Dinov3VitOutput:
     """Output of Dinov3VitModel, matching HF BaseModelOutputWithPooling."""
@@ -47,6 +50,7 @@ class Dinov3VitModel(eqx.Module):
         norm = self.norm.load_state_dict(state_dict, prefix=prefix + "norm.")
         return eu.replace(self, embeddings=embeddings, layer=layers, norm=norm)
 
+    @pjit
     def __call__(self, pixel_values: Array) -> Dinov3VitOutput:
         hidden_states = self.embeddings(pixel_values)
         position_embeddings = self.rope_embeddings(pixel_values)
@@ -62,6 +66,7 @@ class Dinov3VitModel(eqx.Module):
             pooler_output=pooler_output,
         )
 
+    @pjit(static_argnames=["n", "reshape", "return_class_token", "norm"])
     def get_intermediate_layers(
         self,
         pixel_values: Array,
@@ -70,7 +75,7 @@ class Dinov3VitModel(eqx.Module):
         reshape: bool = False,
         return_class_token: bool = False,
         norm: bool = True,
-    ) -> tuple:
+    ) -> tuple[Array, ...] | tuple[tuple[Array, Array], ...]:
         """Get intermediate layer outputs.
 
         Args:

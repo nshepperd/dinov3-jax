@@ -1,6 +1,6 @@
 import jax
 import jax.numpy as jnp
-from jaxtyping import Float, Array, PRNGKeyArray
+from jaxtyping import Float, Array
 import equinox as eqx
 import eepynox.utils as eu
 
@@ -19,15 +19,9 @@ class RMSNorm(eqx.Module):
         self.weight = jnp.ones(dim, dtype=dtype)
         self.dtype = jnp.dtype(dtype)
     
-    def init_weights(self, key: PRNGKeyArray):
-        self.weight = jnp.ones(self.dim, dtype=self.dtype)
-    
     def load_state_dict(self, state_dict: dict[str, Array], prefix: str = ""):
         assert state_dict[prefix + "weight"].shape == (self.dim,)
         return eu.replace(self, weight=state_dict.pop(prefix + "weight").astype(self.dtype))
-
-    def state_dict(self, prefix: str = "") -> dict[str, Array]:
-        return {prefix + "weight": self.weight}
 
     def _norm(self, x: Array) -> Array:
         """Compute RMS normalization."""
@@ -53,10 +47,6 @@ class LayerNorm(eqx.Module):
         self.weight = jnp.ones(dim, dtype=dtype)
         self.bias = jnp.zeros(dim, dtype=dtype)
         self.dtype = jnp.dtype(dtype)
-    
-    def init_weights(self, key: PRNGKeyArray):
-        self.weight = jnp.ones(self.dim, dtype=self.dtype)
-        self.bias = jnp.zeros(self.dim, dtype=self.dtype)
     
     def load_state_dict(self, state_dict: dict[str, Array], prefix: str = ""):
         assert state_dict[prefix + "weight"].shape == (self.dim,)

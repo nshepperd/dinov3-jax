@@ -1,13 +1,10 @@
-from scipy.constants import u
-import math
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 import einops
 import equinox as eqx
-import jax
 import jax.numpy as jnp
 from flash_attn_jax import flash_mha
-from jaxtyping import Array, Float, PRNGKeyArray
+from jaxtyping import Array, Float
 
 import eepynox.utils as eu
 from eepynox.nn.linear import Linear
@@ -43,22 +40,7 @@ class LinearKMaskedBias(eqx.Module):
         self.weight = None
         self.bias = None
         self.bias_mask = None
-        
-    #     # Initialize weight
-    #     self.weight = init.glorot_normal(out_features, in_features)
-        
-    #     # Initialize bias with masking for K
-    #     if use_bias:
-    #         self.bias = init.zeros(out_features)
-    #         # Create bias mask (NaN for K, 1 for Q and V)
-    #         k_size = out_features // 3
-    #         bias_mask = jnp.ones(out_features)
-    #         bias_mask = bias_mask.at[k_size:2*k_size].set(jnp.nan)
-    #         self.bias_mask = bias_mask
-    #     else:
-    #         self.bias = None
-    #         self.bias_mask = None
-    
+
     def load_state_dict(self, state_dict: dict[str, Array], prefix: str = ""):
         assert state_dict[prefix + "weight"].shape == (self.out_features, self.in_features)
         weight = state_dict.pop(prefix + "weight").astype(jnp.float32)
@@ -95,7 +77,6 @@ class SelfAttention(eqx.Module):
     proj: Linear
     num_heads: int = eqx.field(static=True)
     head_dim: int = eqx.field(static=True)
-    scale: float = eqx.field(static=True)
     dim: int = eqx.field(static=True)
 
     def __init__(
@@ -109,7 +90,6 @@ class SelfAttention(eqx.Module):
         super().__init__()
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
-        self.scale = self.head_dim ** -0.5
         self.dim = dim
         
         # QKV projection
@@ -171,54 +151,32 @@ class SelfAttention(eqx.Module):
     def compute_attention(
         self,
         qkv: Array,
-        attn_bias: Optional[Array] = None,
         rope: Optional[Tuple[Array, Array]] = None
     ) -> Array:
-        """Compute multi-head attention."""
+        """Compute multi-head attention using flash attention."""
         B, N, _ = qkv.shape
-        
-        # Reshape QKV
-        q,k,v = einops.rearrange(qkv, 'b n (p h d) -> p b h n d', p=3, h=self.num_heads, d=self.head_dim)
-        
-        # Apply RoPE if provided
+
+        q, k, v = einops.rearrange(qkv, 'b n (p h d) -> p b h n d', p=3, h=self.num_heads, d=self.head_dim)
+
         if rope is not None:
             q, k = self.apply_rope(q, k, rope)
-        
-        # Compute attention scores
-        assert attn_bias is None
+
         dtype = q.dtype
-        if True: # use flash
-            q = einops.rearrange(q, 'b h n d -> b n h d').astype(jnp.float16)  # flash_mha format
-            k = einops.rearrange(k, 'b h n d -> b n h d').astype(jnp.float16)
-            v = einops.rearrange(v, 'b h n d -> b n h d').astype(jnp.float16)
-            x = flash_mha(q, k, v).astype(dtype)
-            x = einops.rearrange(x, 'b n h d -> b n (h d)',b=B,n=N)
-        else:
-            attn = (q @ k.transpose(0, 1, 3, 2)) * self.scale  # B, heads, N, N
-            
-            # Apply attention bias if provided
-            if attn_bias is not None:
-                attn = attn + attn_bias
-            
-            # Softmax
-            attn = jax.nn.softmax(attn, axis=-1)
-            
-            # Apply attention to values
-            x = attn @ v  # B, heads, N, head_dim
-            
-            # Reshape output
-            x = x.transpose(0, 2, 1, 3).reshape(B, N, self.dim)
-        
+        q = einops.rearrange(q, 'b h n d -> b n h d').astype(jnp.float16)
+        k = einops.rearrange(k, 'b h n d -> b n h d').astype(jnp.float16)
+        v = einops.rearrange(v, 'b h n d -> b n h d').astype(jnp.float16)
+        x = flash_mha(q, k, v).astype(dtype)
+        x = einops.rearrange(x, 'b n h d -> b n (h d)', b=B, n=N)
+
         return x
     
     def __call__(
         self,
         x: Array,
-        attn_bias: Optional[Array] = None,
         rope: Optional[Tuple[Array, Array]] = None
     ) -> Array:
         """Forward pass of self-attention."""
         qkv = self.qkv(x)
-        attn_out = self.compute_attention(qkv, attn_bias=attn_bias, rope=rope)
+        attn_out = self.compute_attention(qkv, rope=rope)
         x = self.proj(attn_out)
         return x

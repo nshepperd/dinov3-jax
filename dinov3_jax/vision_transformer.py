@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import logging
 from functools import partial
-from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple, Union
+from typing import Dict, Optional, Sequence, Tuple, Union
 
 import equinox as eqx
-import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Float, Int
+from jaxtyping import Array
 
 import eepynox.utils as eu
 from dinov3_jax.layers.rms_norm import LayerNorm
@@ -15,24 +13,11 @@ from eepynox.nn.activation import Identity
 
 from .config import DinoV3Config
 from .layers import (
-    Mlp,
     PatchEmbed,
     RMSNorm,
     RopePositionEmbedding,
     SelfAttentionBlock,
-    SwiGLUFFN,
 )
-
-logger = logging.getLogger("dinov3_jax")
-
-# Layer dictionaries for configuration
-ffn_layer_dict = {
-    "mlp": Mlp,
-    "swiglu": SwiGLUFFN,
-    "swiglu32": partial(SwiGLUFFN, align_to=32),
-    "swiglu64": partial(SwiGLUFFN, align_to=64),
-    "swiglu128": partial(SwiGLUFFN, align_to=128),
-}
 
 norm_layer_dict = {
     "layernorm": partial(LayerNorm, eps=1e-6),
@@ -62,7 +47,6 @@ class DinoVisionTransformer(eqx.Module):
     mask_token: Array | None
 
     config: DinoV3Config = eqx.field(static=True)
-    # n_storage_tokens: int = eqx.field(static=True)
 
     def __init__(
         self,
@@ -72,12 +56,7 @@ class DinoVisionTransformer(eqx.Module):
     ):
         super().__init__()
         self.config = config
-        
-        # self.num_features = self.embed_dim = config.embed_dim
-        # self.n_blocks = config.depth
-        # self.num_heads = config.num_heads
-        # self.patch_size = config.patch_size
-        
+
         # Patch embedding
         self.patch_embed = PatchEmbed(
             img_size=config.img_size,
@@ -87,26 +66,10 @@ class DinoVisionTransformer(eqx.Module):
             flatten_embedding=False,
         )
         
-        # Class token
-        # self.cls_token = init.normal(1, 1, embed_dim, stddev=0.02)
         self.cls_token = None
-        
-        # Storage tokens (registers)
-        # self.n_storage_tokens = config.n_storage_tokens
         self.storage_tokens = None
-        # if self.n_storage_tokens > 0:
-        #     self.storage_tokens = init.normal(1, n_storage_tokens, embed_dim, stddev=0.02)
         
         # RoPE position embedding
-        logger.info(f"using base={config.pos_embed_rope_base} for rope")
-        logger.info(f"using min_period={config.pos_embed_rope_min_period} for rope")
-        logger.info(f"using max_period={config.pos_embed_rope_max_period} for rope")
-        logger.info(f"using normalize_coords={config.pos_embed_rope_normalize_coords} for rope")
-        logger.info(f"using shift_coords={config.pos_embed_rope_shift_coords} for rope")
-        logger.info(f"using rescale_coords={config.pos_embed_rope_rescale_coords} for rope")
-        logger.info(f"using jitter_coords={config.pos_embed_rope_jitter_coords} for rope")
-        logger.info(f"using dtype={config.pos_embed_rope_dtype} for rope")
-        
         self.rope_embed = RopePositionEmbedding(
             embed_dim=config.embed_dim,
             num_heads=config.num_heads,
@@ -121,8 +84,6 @@ class DinoVisionTransformer(eqx.Module):
         )
         
         # Transformer blocks
-        logger.info(f"using {config.ffn_layer} layer as FFN")
-        
         self.blocks = []
         for i in range(config.depth):
             block = SelfAttentionBlock(
@@ -133,7 +94,6 @@ class DinoVisionTransformer(eqx.Module):
                 proj_bias=config.proj_bias,
                 ffn_bias=config.ffn_bias,
                 norm_layer=config.norm_layer,
-                act_layer='gelu',
                 ffn_layer=config.ffn_layer,
                 init_values=config.layerscale_init,
                 mask_k_bias=config.mask_k_bias,
@@ -145,31 +105,24 @@ class DinoVisionTransformer(eqx.Module):
         # Final normalization
         self.norm = norm_layer_cls(config.embed_dim)
         
-        # Optional untied norms
-        # self.untie_cls_and_patch_norms = config.untie_cls_and_patch_norms
         if config.untie_cls_and_patch_norms:
             self.cls_norm = norm_layer_cls(config.embed_dim)
         else:
             self.cls_norm = None
         
-        # self.untie_global_and_local_cls_norm = config.untie_global_and_local_cls_norm
         if config.untie_global_and_local_cls_norm:
             self.local_cls_norm = norm_layer_cls(config.embed_dim)
         else:
             self.local_cls_norm = None
         
-        # Head (identity for feature extraction)
         self.head = Identity()
-        
-        # Mask token for masked modeling
-        # self.mask_token = init.zeros(1, embed_dim)
         self.mask_token = None
     
     def load_state_dict(self, state_dict: dict[str, Array], prefix='') -> DinoVisionTransformer:
         patch_embed = self.patch_embed.load_state_dict(state_dict, prefix=prefix + 'patch_embed.')
         cls_token = state_dict[prefix + 'cls_token']
         storage_tokens = state_dict.get(prefix + 'storage_tokens', None)
-        rope_embed = self.rope_embed #.load_state_dict(state_dict, prefix=prefix + 'rope_embed.')
+        rope_embed = self.rope_embed
         blocks = []
         for i, block in enumerate(self.blocks):
             block_loaded = block.load_state_dict(state_dict, prefix=prefix + f'blocks.{i}.')
@@ -208,14 +161,16 @@ class DinoVisionTransformer(eqx.Module):
         
         # Apply mask token if masks provided
         if masks is not None:
+            assert self.mask_token is not None, "mask_token must be loaded to use masking"
             mask_token = self.mask_token.astype(x.dtype)
             x = jnp.where(masks[:, :, None], mask_token[None, :, :], x)
-            cls_token = self.cls_token
-        else:
-            cls_token = self.cls_token + 0 * self.mask_token
-        
+
+        assert self.cls_token is not None, "cls_token must be loaded via load_state_dict before forward pass"
+        cls_token = self.cls_token
+
         # Prepare storage tokens
         if self.config.n_storage_tokens > 0:
+            assert self.storage_tokens is not None, "storage_tokens must be loaded via load_state_dict"
             storage_tokens = self.storage_tokens
         else:
             storage_tokens = jnp.empty((1, 0, cls_token.shape[-1]), dtype=cls_token.dtype)
@@ -250,9 +205,6 @@ class DinoVisionTransformer(eqx.Module):
         # Apply final normalization and prepare outputs
         # Apply appropriate normalization
         if self.config.untie_cls_and_patch_norms or self.config.untie_global_and_local_cls_norm:
-            # if self.config.untie_global_and_local_cls_norm and cx.mode == "train" and idx == 1:
-            #     # Local crops get local norm
-            #     x_norm_cls_reg = self.local_cls_norm(cx, x[:, :self.config.n_storage_tokens + 1])
             if self.config.untie_cls_and_patch_norms:
                 assert self.cls_norm is not None
                 x_norm_cls_reg = self.cls_norm(x[:, :self.config.n_storage_tokens + 1])

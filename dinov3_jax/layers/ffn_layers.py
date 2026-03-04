@@ -1,5 +1,4 @@
-from functools import partial
-from typing import Callable, List, Literal, Optional
+from typing import Optional
 
 import equinox as eqx
 import jax
@@ -22,7 +21,6 @@ class Mlp(eqx.Module):
         in_features: int,
         hidden_features: Optional[int] = None,
         out_features: Optional[int] = None,
-        act_layer: Literal['gelu'] = 'gelu',
         bias: bool = True,
     ):
         super().__init__()

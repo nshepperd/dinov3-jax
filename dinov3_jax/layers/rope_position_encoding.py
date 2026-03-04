@@ -2,12 +2,8 @@ import math
 from typing import Literal, Optional
 
 import equinox as eqx
-import jax
 import jax.numpy as jnp
-import numpy as np
-from jaxtyping import Array, Float, PRNGKeyArray
-
-import eepynox.utils as eu
+from jaxtyping import Array, Float
 
 
 class RopePositionEmbedding(eqx.Module):
@@ -96,36 +92,7 @@ class RopePositionEmbedding(eqx.Module):
         coords = jnp.stack([coords_h_grid, coords_w_grid], axis=-1)  # [H, W, 2]
         coords = coords.reshape(-1, 2)  # [HW, 2]
         coords = 2.0 * coords - 1.0  # Shift range [0, 1] to [-1, +1]
-        
-        # # Apply coordinate transformations during training
-        # if cx.mode == "train":
-        #     # Shift coords
-        #     if self.shift_coords is not None:
-        #         shift_hw = cx.random.uniform(
-        #             shape=(2,),
-        #             minval=-self.shift_coords,
-        #             maxval=self.shift_coords
-        #         ).astype(dtype)
-        #         coords = coords + shift_hw[None, :]
-            
-        #     # Jitter coords
-        #     if self.jitter_coords is not None:
-        #         jitter_max = np.log(self.jitter_coords)
-        #         jitter_min = -jitter_max
-        #         jitter_hw = jnp.exp(
-        #             cx.random.uniform(shape=(2,), minval=jitter_min, maxval=jitter_max)
-        #         ).astype(dtype)
-        #         coords = coords * jitter_hw[None, :]
-            
-        #     # Rescale coords
-        #     if self.rescale_coords is not None:
-        #         rescale_max = np.log(self.rescale_coords)
-        #         rescale_min = -rescale_max
-        #         rescale_hw = jnp.exp(
-        #             cx.random.uniform(shape=(1,), minval=rescale_min, maxval=rescale_max)
-        #         ).astype(dtype)
-        #         coords = coords * rescale_hw
-        
+
         # Prepare angles and sin/cos
         angles = 2 * math.pi * coords[:, :, None] / periods[None, None, :]  # [HW, 2, D//4]
         angles = angles.reshape(-1, self.D_head // 2)  # [HW, D//2]

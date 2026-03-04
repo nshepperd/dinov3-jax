@@ -1,9 +1,7 @@
 from functools import partial
-from typing import Callable, List, Literal, Optional, Tuple, Union
+from typing import Literal, Optional, Tuple
 
 import equinox as eqx
-import jax
-import jax.numpy as jnp
 from jaxtyping import Array
 
 from .attention import SelfAttention
@@ -33,14 +31,12 @@ class SelfAttentionBlock(eqx.Module):
         proj_bias: bool = True,
         ffn_bias: bool = True,
         init_values: Optional[float] = None,
-        act_layer: Literal['gelu'] = 'gelu',
         norm_layer: Literal['layernorm', 'layernormbf16', 'rmsnorm'] = 'layernorm',
-        attn_class: Literal['self_attention'] = 'self_attention',
         ffn_layer: Literal['mlp', 'swiglu', 'swiglu32', 'swiglu64', 'swiglu128'] = 'mlp',
         mask_k_bias: bool = False,
     ):
         super().__init__()
-        
+
         f_norm_layer = {
             'layernorm': partial(LayerNorm, eps=1e-6),
             'layernormbf16': partial(LayerNorm, eps=1e-5),
@@ -53,13 +49,9 @@ class SelfAttentionBlock(eqx.Module):
             'swiglu64': partial(SwiGLUFFN, align_to=64),
             'swiglu128': partial(SwiGLUFFN, align_to=128),
         }[ffn_layer]
-        f_attn_class = {
-            'self_attention': SelfAttention,
-        }[attn_class]  # Only
 
-        # First block: attention
         self.norm1 = f_norm_layer(dim)
-        self.attn = f_attn_class(
+        self.attn = SelfAttention(
             dim,
             num_heads=num_heads,
             qkv_bias=qkv_bias,
@@ -74,7 +66,6 @@ class SelfAttentionBlock(eqx.Module):
         self.mlp = f_ffn_layer(
             in_features=dim,
             hidden_features=mlp_hidden_dim,
-            act_layer=act_layer,
             bias=ffn_bias,
         )
         self.ls2 = LayerScale(dim, init_values=init_values) if init_values else None
@@ -106,24 +97,6 @@ class SelfAttentionBlock(eqx.Module):
             ls2=ls2,
         )
 
-    # def _apply_drop_path(
-    #     self,
-    #     cx: Context,
-    #     x: jnp.ndarray,
-    #     residual: jnp.ndarray,
-    #     scale: float = 1.0
-    # ) -> jnp.ndarray:
-    #     """Apply stochastic depth (drop path) during training."""
-    #     if cx.mode == "train" and self.drop_path_rate > 0:
-    #         # Random binary mask for dropping paths
-    #         keep_prob = 1 - self.drop_path_rate
-    #         shape = (x.shape[0],) + (1,) * (x.ndim - 1)
-    #         random_tensor = cx.random.bernoulli(keep_prob, shape=shape)
-    #         random_tensor = random_tensor / keep_prob
-    #         return x + residual * random_tensor * scale
-    #     else:
-    #         return x + residual * scale
-    
     def __call__(
         self,
         x: Array,

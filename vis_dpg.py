@@ -5,7 +5,8 @@ Click anywhere on the image to see which patches have similar features.
 """
 
 import os
-os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
+os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "cuda_async"
+os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.25"
 
 import jax
 import jax.numpy as jnp
@@ -18,36 +19,47 @@ from dinov3_jax import dinov3_vitl16
 
 # Configuration
 PATCH_SIZE = 16
-IMAGE_SIZE = 768*3  # Smaller for interactive use
+IMAGE_SIZE = 768  # Display size (height)
+FEATURE_SCALE = 2.0  # Scale factor for feature extraction input (2.0 = 2x resolution feature map)
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 
 # Paths - adjust these
-IMAGE_PATH = "/home/em/Dev/neural/minihf/yonaka/data/2024-11-01_15.10.05.png"
+IMAGE_PATH = "data/2024-11-01_15.10.05.png"
 WEIGHTS_PATH = "/data/models/dinov3_vitl16_pretrain_lvd1689m-8aa4cbdd.pth"
 
 
-def load_and_preprocess_image(path: str, image_size: int, patch_size: int):
-    """Load and preprocess image for DINOv3."""
-    image = Image.open(path).convert("RGB")
+def load_and_preprocess_image(path: str, image_size: int, patch_size: int, feature_scale: float = 1.0):
+    """Load and preprocess image for DINOv3.
 
-    # Resize to dimensions divisible by patch size
+    Returns display image and feature extraction tensor (possibly at different resolution).
+    """
+    image = Image.open(path).convert("RGB")
     w, h = image.size
+
+    # Display image: sized to image_size height
     h_patches = int(image_size / patch_size)
     w_patches = int((w * image_size) / (h * patch_size))
-    new_h = h_patches * patch_size
-    new_w = w_patches * patch_size
-    image_resized = image.resize((new_w, new_h), Image.Resampling.BILINEAR)
+    display_h = h_patches * patch_size
+    display_w = w_patches * patch_size
+    image_display = image.resize((display_w, display_h), Image.Resampling.BILINEAR)
 
-    # Convert to tensor
-    img_array = np.array(image_resized).astype(np.float32) / 255.0
+    # Feature extraction image: scaled up for higher-res feature map
+    feat_h_patches = int(h_patches * feature_scale)
+    feat_w_patches = int(w_patches * feature_scale)
+    feat_h = feat_h_patches * patch_size
+    feat_w = feat_w_patches * patch_size
+    image_feat = image.resize((feat_w, feat_h), Image.Resampling.BILINEAR)
+
+    # Convert feature image to tensor
+    img_array = np.array(image_feat).astype(np.float32) / 255.0
     img_array = img_array.transpose(2, 0, 1)  # CHW
     for c in range(3):
         img_array[c] = (img_array[c] - IMAGENET_MEAN[c]) / IMAGENET_STD[c]
     img_tensor = jnp.array(img_array[np.newaxis, ...])
 
-    return image_resized, img_tensor
+    return image_display, img_tensor
 
 
 def extract_features(model, image_tensor, embed_dim):
@@ -131,9 +143,11 @@ class SimilarityVisualizer:
         # Blend with original
         blended = self.image_array * (1 - self.alpha) + sim_array * self.alpha
 
-        # Draw crosshair at target location
-        cx = col * PATCH_SIZE + PATCH_SIZE // 2
-        cy = row * PATCH_SIZE + PATCH_SIZE // 2
+        # Draw crosshair at target location (map patch coords to display pixels)
+        px_per_patch_x = self.img_w / self.W
+        px_per_patch_y = self.img_h / self.H
+        cx = int(col * px_per_patch_x + px_per_patch_x / 2)
+        cy = int(row * px_per_patch_y + px_per_patch_y / 2)
         cross_size = 10
         cross_thickness = 2
 
@@ -158,9 +172,9 @@ class SimilarityVisualizer:
 
 def main():
     print("Loading image...")
-    image, image_tensor = load_and_preprocess_image(IMAGE_PATH, IMAGE_SIZE, PATCH_SIZE)
-    print(f"Image size: {image.size}")
-    print(f"Tensor shape: {image_tensor.shape}")
+    image, image_tensor = load_and_preprocess_image(IMAGE_PATH, IMAGE_SIZE, PATCH_SIZE, FEATURE_SCALE)
+    print(f"Display size: {image.size}")
+    print(f"Feature tensor shape: {image_tensor.shape}")
 
     print("Loading model...")
     model = dinov3_vitl16()
@@ -180,7 +194,7 @@ def main():
     print("Extracting features...")
     features = extract_features(model, image_tensor, embed_dim=1024)
     features_np = np.array(features)
-    print(f"Feature shape: {features_np.shape}")
+    print(f"Feature grid: {features_np.shape} ({features_np.shape[1]}x{features_np.shape[0]} patches)")
 
     # Create visualizer
     vis = SimilarityVisualizer(image, features_np)
@@ -221,9 +235,9 @@ def main():
         if x < 0 or x >= img_w or y < 0 or y >= img_h:
             return
 
-        # Convert to patch coordinates (flip y since plot axis is inverted)
-        col = int(x / PATCH_SIZE)
-        row = int((img_h - y) / PATCH_SIZE)
+        # Convert to patch coordinates using feature grid dimensions
+        col = int(x / img_w * vis.W)
+        row = int((img_h - y) / img_h * vis.H)
 
         # Clamp to valid range
         row = max(0, min(vis.H - 1, row))

@@ -21,6 +21,7 @@ dependencies = [
     "Pillow",
     "pydantic",
     "equinox",
+    "safetensors",
 ]
 
 [dependency-groups]

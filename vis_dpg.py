@@ -274,7 +274,10 @@ def main():
         print("No starting image — paste one with Ctrl+V")
 
     # Mutable state for closures (updated on paste)
-    state = {'vis': vis, 'img_w': img_w, 'img_h': img_h, 'tex_id': 0}
+    CONTROLS_PAD_Y = 100  # vertical space for controls above plot
+    CONTROLS_PAD_X = 30   # horizontal padding
+    state = {'vis': vis, 'img_w': img_w, 'img_h': img_h, 'tex_id': 0,
+             'vp_w': 0, 'vp_h': 0}
 
     # Setup DearPyGui
     dpg.create_context()
@@ -304,6 +307,32 @@ def main():
         dpg.set_value("stats_text",
             f"Patch: ({v.current_row}, {v.current_col}) | "
             f"Similarity: [{stats[0]:.3f}, {stats[1]:.3f}] mean={stats[2]:.3f}")
+
+    def resize_plot_to_fit():
+        """Resize the plot to fit the current viewport, preserving aspect ratio."""
+        vp_w = dpg.get_viewport_client_width()
+        vp_h = dpg.get_viewport_client_height()
+        if vp_w == state['vp_w'] and vp_h == state['vp_h']:
+            return
+        state['vp_w'] = vp_w
+        state['vp_h'] = vp_h
+
+        iw, ih = state['img_w'], state['img_h']
+        if iw == 0 or ih == 0:
+            return
+
+        avail_w = max(100, vp_w - CONTROLS_PAD_X)
+        avail_h = max(100, vp_h - CONTROLS_PAD_Y)
+        aspect = iw / ih
+
+        if avail_w / avail_h > aspect:
+            plot_h = avail_h
+            plot_w = int(plot_h * aspect)
+        else:
+            plot_w = avail_w
+            plot_h = int(plot_w / aspect)
+
+        dpg.configure_item("main_plot", width=plot_w, height=plot_h)
 
     def handle_mouse_input():
         """Update if left mouse button is down and mouse is over the plot."""
@@ -386,12 +415,13 @@ def main():
             parent="y_axis",
         )
 
-        # Update plot layout for new image size
+        # Update plot axis limits for new image coordinate space
         dpg.set_axis_limits("x_axis", 0, new_w)
         dpg.set_axis_limits("y_axis", new_h, 0)
-        dpg.configure_item("main_plot", width=new_w, height=new_h)
-        dpg.set_viewport_width(new_w + 50)
-        dpg.set_viewport_height(new_h + 150)
+
+        # Force resize recalculation on next frame
+        state['vp_w'] = 0
+        state['vp_h'] = 0
 
         update_display()
         print(f"Pasted image: {clip_img.size} -> display {new_w}x{new_h}, features {feats_np.shape}")
@@ -414,8 +444,8 @@ def main():
         # Use a plot to display the image (allows mouse position tracking)
         with dpg.plot(
             label="",
-            width=img_w,
-            height=img_h,
+            width=-1,
+            height=-1,
             no_title=True,
             no_menus=True,
             no_box_select=True,
@@ -440,7 +470,9 @@ def main():
     else:
         dpg.set_value("stats_text", "Paste an image with Ctrl+V")
 
-    dpg.create_viewport(title="DINOv3 Feature Similarity Visualizer", width=img_w + 50, height=img_h + 150)
+    init_vp_w = min(img_w + CONTROLS_PAD_X, 1600)
+    init_vp_h = min(img_h + CONTROLS_PAD_Y, 1000)
+    dpg.create_viewport(title="DINOv3 Feature Similarity Visualizer", width=init_vp_w, height=init_vp_h)
     dpg.setup_dearpygui()
     dpg.show_viewport()
     dpg.set_primary_window("main_window", True)
@@ -448,6 +480,7 @@ def main():
     # Manual render loop to check mouse state and keyboard each frame
     v_was_down = False
     while dpg.is_dearpygui_running():
+        resize_plot_to_fit()
         handle_mouse_input()
 
         # Detect Ctrl+V keypress (edge-triggered)

@@ -18,9 +18,6 @@ class RopePositionEmbedding(eqx.Module):
     max_period: Optional[float] = eqx.field(static=True)
     D_head: int = eqx.field(static=True)
     normalize_coords: Literal["min", "max", "separate"] = eqx.field(static=True)
-    shift_coords: Optional[float] = eqx.field(static=True)
-    jitter_coords: Optional[float] = eqx.field(static=True)
-    rescale_coords: Optional[float] = eqx.field(static=True)
     dtype: jnp.dtype = eqx.field(static=True)
     
     def __init__(
@@ -32,9 +29,6 @@ class RopePositionEmbedding(eqx.Module):
         min_period: Optional[float] = None,
         max_period: Optional[float] = None,
         normalize_coords: Literal["min", "max", "separate"] = "separate",
-        shift_coords: Optional[float] = None,
-        jitter_coords: Optional[float] = None,
-        rescale_coords: Optional[float] = None,
         dtype: Optional[jnp.dtype] = None,
         device: Optional[str] = None,  # Ignored in JAX
     ):
@@ -50,9 +44,6 @@ class RopePositionEmbedding(eqx.Module):
         self.max_period = max_period
         self.D_head = D_head
         self.normalize_coords = normalize_coords
-        self.shift_coords = shift_coords
-        self.jitter_coords = jitter_coords
-        self.rescale_coords = rescale_coords
         self.dtype = dtype or jnp.float32
         
         if self.base is not None:

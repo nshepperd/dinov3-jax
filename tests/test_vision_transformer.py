@@ -21,7 +21,6 @@ jax.config.update("jax_default_matmul_precision", "highest")
 
 vits_16_kwargs = dict(
     pos_embed_rope_dtype="fp32",         # default is "bf16"
-    pos_embed_rope_rescale_coords=2,     # default is None
     embed_dim=384,                        # default is 768
     num_heads=6,                          # default is 12
     layerscale_init=1.0e-05,            # default is None
@@ -95,7 +94,8 @@ class TestVisionTransformer(unittest.TestCase):
         x_pt = torch.from_numpy(x_np)
         
         # Forward pass JAX
-        output_jax, layers_jax = collect_layers_eqx(model_jax, x_jax, is_training=False)
+        output_jax_dict, layers_jax = collect_layers_eqx(model_jax, x_jax)
+        output_jax = output_jax_dict["x_norm_clstoken"]
 
         # Forward pass PyTorch
         model_pt.eval()

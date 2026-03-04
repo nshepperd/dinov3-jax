@@ -67,7 +67,7 @@ class PatchEmbed(eqx.Module):
         proj = self.proj.load_state_dict(state_dict, prefix + "proj.")
         return eu.replace(self, proj=proj)
     
-    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+    def __call__(self, x: Array) -> Array:
         B, C, H, W = x.shape
         
         # Apply convolution to extract patches

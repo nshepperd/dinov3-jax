@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from functools import partial
-from typing import Dict, Optional, Sequence, Tuple, Union
+from typing import Dict, Sequence, Tuple, Union
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -9,8 +9,6 @@ from jaxtyping import Array
 
 import eepynox.utils as eu
 from dinov3_jax.layers.rms_norm import LayerNorm
-from eepynox.nn.activation import Identity
-
 from .config import DinoV3Config
 from .layers import (
     PatchEmbed,
@@ -43,9 +41,6 @@ class DinoVisionTransformer(eqx.Module):
     norm: RMSNorm | LayerNorm
     cls_norm: RMSNorm | LayerNorm | None
     local_cls_norm: RMSNorm | LayerNorm | None
-    head: Identity
-    mask_token: Array | None
-
     config: DinoV3Config = eqx.field(static=True)
 
     def __init__(
@@ -77,9 +72,6 @@ class DinoVisionTransformer(eqx.Module):
             min_period=config.pos_embed_rope_min_period,
             max_period=config.pos_embed_rope_max_period,
             normalize_coords=config.pos_embed_rope_normalize_coords,
-            shift_coords=config.pos_embed_rope_shift_coords,
-            jitter_coords=config.pos_embed_rope_jitter_coords,
-            rescale_coords=config.pos_embed_rope_rescale_coords,
             dtype=dtype_dict[config.pos_embed_rope_dtype],
         )
         
@@ -115,9 +107,6 @@ class DinoVisionTransformer(eqx.Module):
         else:
             self.local_cls_norm = None
         
-        self.head = Identity()
-        self.mask_token = None
-    
     def load_state_dict(self, state_dict: dict[str, Array], prefix='') -> DinoVisionTransformer:
         patch_embed = self.patch_embed.load_state_dict(state_dict, prefix=prefix + 'patch_embed.')
         cls_token = state_dict[prefix + 'cls_token']
@@ -134,7 +123,6 @@ class DinoVisionTransformer(eqx.Module):
         local_cls_norm = None
         if self.local_cls_norm is not None:
             local_cls_norm = self.local_cls_norm.load_state_dict(state_dict, prefix=prefix + 'local_cls_norm.')
-        mask_token = state_dict.get(prefix + 'mask_token', None)
         return eu.replace(
             self,
             patch_embed=patch_embed,
@@ -145,25 +133,17 @@ class DinoVisionTransformer(eqx.Module):
             norm=norm,
             cls_norm=cls_norm,
             local_cls_norm=local_cls_norm,
-            mask_token=mask_token,
         )
 
-    def prepare_tokens_with_masks(
+    def prepare_tokens(
         self,
         x: Array,
-        masks: Optional[Array] = None
     ) -> Tuple[Array, Tuple[int, int]]:
-        """Prepare tokens from image patches with optional masking."""
-        
+        """Prepare tokens from image patches."""
+
         x = self.patch_embed(x)
         B, H, W, _ = x.shape
         x = x.reshape(B, H * W, -1)
-        
-        # Apply mask token if masks provided
-        if masks is not None:
-            assert self.mask_token is not None, "mask_token must be loaded to use masking"
-            mask_token = self.mask_token.astype(x.dtype)
-            x = jnp.where(masks[:, :, None], mask_token[None, :, :], x)
 
         assert self.cls_token is not None, "cls_token must be loaded via load_state_dict before forward pass"
         cls_token = self.cls_token
@@ -186,12 +166,10 @@ class DinoVisionTransformer(eqx.Module):
     def forward_features(
         self,
         x: Array,
-        masks: Optional[Array] = None
     ) -> Dict[str, Array]:
-        """Forward pass for a list of inputs (multi-crop training)."""
-        
-        # Prepare tokens for each input
-        tokens, rope_hw = self.prepare_tokens_with_masks(x, masks)
+        """Forward pass extracting normalized features."""
+
+        tokens, rope_hw = self.prepare_tokens(x)
         
         # Process through transformer blocks
         for block in self.blocks:
@@ -201,8 +179,7 @@ class DinoVisionTransformer(eqx.Module):
             # Forward through block
             tokens = block(tokens, rope)
         
-        x, masks = tokens, masks
-        # Apply final normalization and prepare outputs
+        x = tokens
         # Apply appropriate normalization
         if self.config.untie_cls_and_patch_norms or self.config.untie_global_and_local_cls_norm:
             if self.config.untie_cls_and_patch_norms:
@@ -222,7 +199,6 @@ class DinoVisionTransformer(eqx.Module):
             "x_storage_tokens": x_norm_cls_reg[:, 1:],
             "x_norm_patchtokens": x_norm_patch,
             "x_prenorm": x,
-            "masks": masks,
         }
         return output
     
@@ -238,7 +214,7 @@ class DinoVisionTransformer(eqx.Module):
     ) -> Tuple[Union[Array, Tuple[Array, ...]]]:
         """Get intermediate layer outputs."""
         
-        x, (H, W) = self.prepare_tokens_with_masks(x)
+        x, (H, W) = self.prepare_tokens(x)
         
         # Determine which blocks to take
         total_blocks = len(self.blocks)
@@ -294,24 +270,9 @@ class DinoVisionTransformer(eqx.Module):
         else:
             return tuple(zip(outputs, class_tokens, extra_tokens))
     
-    def __call__(
-        self,
-        *args,
-        is_training: bool = False,
-        **kwargs
-    ) -> Dict[str, Array] | Array:
-        """Forward pass."""
-        
-        ret = self.forward_features(*args, **kwargs)
-        if is_training:
-            return ret
-        else:
-            # Return class token for inference
-            if isinstance(ret, dict):
-                return self.head(ret["x_norm_clstoken"])
-            else:
-                # If list, return first element's class token
-                return self.head(ret[0]["x_norm_clstoken"])
+    def __call__(self, x: Array) -> Dict[str, Array]:
+        """Forward pass. Returns normalized feature dict."""
+        return self.forward_features(x)
 
 # Model constructors
 def vit_small(patch_size=16, **kwargs):
@@ -429,7 +390,6 @@ def vit_7b(patch_size=16, **kwargs):
 def dinov3_vits16():
     vits_16_kwargs = dict(
         pos_embed_rope_dtype="fp32",         # default is "bf16"
-        pos_embed_rope_rescale_coords=2,     # default is None
         embed_dim=384,                        # default is 768
         num_heads=6,                          # default is 12
         layerscale_init=1.0e-05,            # default is None
@@ -442,7 +402,6 @@ def dinov3_vits16():
 def dinov3_vitl16():
     kwargs = dict(
         pos_embed_rope_dtype="fp32",         # default is "bf16"
-        pos_embed_rope_rescale_coords=2,     # default is None
         embed_dim=1024,                       # default is 768
         num_heads=16,                         # default is 12
         depth=24,                             # default is 12

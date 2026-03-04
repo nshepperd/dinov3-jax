@@ -4,6 +4,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 import equinox as eqx
+from jaxtyping import Array
 
 import torch
 import torch.nn as nn
@@ -13,7 +14,7 @@ from dinov3.layers.layer_scale import LayerScale as LayerScalePyTorch
 jax.config.update("jax_default_matmul_precision", "highest")
 
 
-def convert_state_dict(state_dict: dict[str, torch.Tensor]) -> dict[str, jnp.ndarray]:
+def convert_state_dict(state_dict: dict[str, torch.Tensor]) -> dict[str, Array]:
     """Convert a PyTorch state dict to JAX format."""
     return {k: jnp.array(v.detach().cpu().numpy()) for k, v in state_dict.items()}
 

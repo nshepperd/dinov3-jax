@@ -10,16 +10,12 @@ class DinoV3Config(BaseModel):
     pos_embed_rope_min_period: Optional[float] = None
     pos_embed_rope_max_period: Optional[float] = None
     pos_embed_rope_normalize_coords: Literal["min", "max", "separate"] = "separate"
-    pos_embed_rope_shift_coords: Optional[float] = None
-    pos_embed_rope_jitter_coords: Optional[float] = None
-    pos_embed_rope_rescale_coords: Optional[float] = None
     pos_embed_rope_dtype: str = "bf16"
     embed_dim: int = 768
     depth: int = 12
     num_heads: int = 12
     ffn_ratio: float = 4.0
     qkv_bias: bool = True
-    drop_path_rate: float = 0.0
     layerscale_init: Optional[float] = None
     norm_layer: Literal["layernorm", "layernormbf16", "rmsnorm"] = "layernorm"
     ffn_layer: Literal["mlp", "swiglu", "swiglu32", "swiglu64", "swiglu128"] = "mlp"

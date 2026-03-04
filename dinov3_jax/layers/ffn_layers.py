@@ -76,7 +76,7 @@ class SwiGLUFFN(eqx.Module):
         w3 = self.w3.load_state_dict(state_dict, prefix=prefix + "w3.")
         return eu.replace(self, w1=w1, w2=w2, w3=w3)
 
-    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+    def __call__(self, x: Array) -> Array:
         x1 = self.w1(x)
         x2 = self.w2(x)
         hidden = jax.nn.silu(x1) * x2

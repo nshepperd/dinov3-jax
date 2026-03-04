@@ -64,11 +64,13 @@ def load_and_preprocess_image(path: str, image_size: int, patch_size: int, featu
 
 def extract_features(model, image_tensor, embed_dim):
     """Extract features from the model."""
+    n_layers = len(model.blocks)
+
     @jax.jit
     def fwd(model, image_tensor):
         features = model.get_intermediate_layers(
             image_tensor.astype(jnp.float32),
-            n=24,  # All layers for ViT-L
+            n=n_layers,
             reshape=True,
             norm=True
         )

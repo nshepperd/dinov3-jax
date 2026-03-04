@@ -22,6 +22,8 @@ dependencies = [
     "pydantic",
     "equinox",
     "safetensors",
+    "transformers",
+    "huggingface_hub",
 ]
 
 [dependency-groups]

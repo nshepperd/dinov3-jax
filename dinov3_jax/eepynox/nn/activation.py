@@ -3,7 +3,7 @@ import jax.numpy as jnp
 from jaxtyping import Array
 import jax
 
-import eepynox.utils as eu
+import dinov3_jax.eepynox.utils as eu
 
 class GELU(eqx.Module):
     """Gaussian Error Linear Unit (GELU) activation function."""

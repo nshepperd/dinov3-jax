@@ -1,9 +1,8 @@
-from mpmath.tests.test_compatibility import N
 import jax
 import jax.numpy as jnp
 from jaxtyping import Float, Array, PRNGKeyArray
 import equinox as eqx
-import eepynox.utils as eu
+import dinov3_jax.eepynox.utils as eu
 import math
 
 

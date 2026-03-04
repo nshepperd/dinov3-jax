@@ -3,7 +3,7 @@ name = "dinov3-jax"
 version = "0.1.0"
 description = "DINOv3 jax port"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "jax[cuda12]>=0.8.2",
     "torch",
@@ -21,6 +21,9 @@ dependencies = [
     "Pillow",
     "pydantic",
     "equinox",
+    "safetensors",
+    "transformers",
+    "huggingface_hub",
 ]
 
 [dependency-groups]

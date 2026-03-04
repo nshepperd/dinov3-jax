@@ -1,31 +1,40 @@
-from pydantic import BaseModel, ConfigDict
-from typing import Optional, Literal
+from __future__ import annotations
 
-class DinoV3Config(BaseModel):
+import json
+from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict
+
+
+class Dinov3VitConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
-    img_size: int = 224
+
+    hidden_size: int = 384
+    intermediate_size: int = 1536
+    num_hidden_layers: int = 12
+    num_attention_heads: int = 6
+    hidden_act: str = "gelu"
+    layer_norm_eps: float = 1e-5
+    rope_theta: float = 100.0
+    image_size: int = 224
     patch_size: int = 16
-    in_chans: int = 3
-    pos_embed_rope_base: float = 100.0
-    pos_embed_rope_min_period: Optional[float] = None
-    pos_embed_rope_max_period: Optional[float] = None
-    pos_embed_rope_normalize_coords: Literal["min", "max", "separate"] = "separate"
-    pos_embed_rope_shift_coords: Optional[float] = None
-    pos_embed_rope_jitter_coords: Optional[float] = None
-    pos_embed_rope_rescale_coords: Optional[float] = None
-    pos_embed_rope_dtype: str = "bf16"
-    embed_dim: int = 768
-    depth: int = 12
-    num_heads: int = 12
-    ffn_ratio: float = 4.0
-    qkv_bias: bool = True
-    drop_path_rate: float = 0.0
-    layerscale_init: Optional[float] = None
-    norm_layer: Literal["layernorm", "layernormbf16", "rmsnorm"] = "layernorm"
-    ffn_layer: Literal["mlp", "swiglu", "swiglu32", "swiglu64", "swiglu128"] = "mlp"
-    ffn_bias: bool = True
+    num_channels: int = 3
+    query_bias: bool = True
+    key_bias: bool = False
+    value_bias: bool = True
     proj_bias: bool = True
-    n_storage_tokens: int = 0
-    mask_k_bias: bool = False
-    untie_cls_and_patch_norms: bool = False
-    untie_global_and_local_cls_norm: bool = False
+    mlp_bias: bool = True
+    layerscale_value: float = 1.0
+    use_gated_mlp: bool = False
+    num_register_tokens: int = 0
+
+    @classmethod
+    def from_pretrained(cls, model_path: str | Path) -> Dinov3VitConfig:
+        """Load config from a HuggingFace model directory containing config.json."""
+        config_path = Path(model_path) / "config.json"
+        with open(config_path) as f:
+            data = json.load(f)
+        # Filter to only fields this config knows about
+        valid_fields = cls.model_fields.keys()
+        filtered = {k: v for k, v in data.items() if k in valid_fields}
+        return cls(**filtered)

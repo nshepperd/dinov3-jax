@@ -15,7 +15,8 @@ from eepynox.debug import maybe_debugpy_postmortem
 jax.config.update("jax_default_matmul_precision", "highest")
 
 # Reduce memory allocation
-os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
+os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "cuda_async"
+os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.25"
 torch.cuda.memory.set_per_process_memory_fraction(0.4)
 
 # try:

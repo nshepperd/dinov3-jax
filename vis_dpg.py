@@ -15,19 +15,19 @@ from PIL import Image
 import dearpygui.dearpygui as dpg
 
 # JAX DINOv3 imports
-from dinov3_jax import dinov3_vitl16
+from dinov3_jax import load_dinov3
 
 # Configuration
 PATCH_SIZE = 16
 IMAGE_SIZE = 768  # Display size (height)
-FEATURE_SCALE = 2.0  # Scale factor for feature extraction input (2.0 = 2x resolution feature map)
+FEATURE_SCALE = 3.0  # Scale factor for feature extraction input (2.0 = 2x resolution feature map)
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 
 # Paths - adjust these
 IMAGE_PATH = "data/2024-11-01_15.10.05.png"
-WEIGHTS_PATH = "/data/models/dinov3_vitl16_pretrain_lvd1689m-8aa4cbdd.pth"
+MODEL_PATH = "/data/models/dinov3-vitl16-pretrain-lvd1689m"
 
 
 def load_and_preprocess_image(path: str, image_size: int, patch_size: int, feature_scale: float = 1.0):
@@ -64,7 +64,7 @@ def load_and_preprocess_image(path: str, image_size: int, patch_size: int, featu
 
 def extract_features(model, image_tensor, embed_dim):
     """Extract features from the model."""
-    n_layers = len(model.blocks)
+    n_layers = len(model.layer)
 
     @jax.jit
     def fwd(model, image_tensor):
@@ -179,22 +179,10 @@ def main():
     print(f"Feature tensor shape: {image_tensor.shape}")
 
     print("Loading model...")
-    model = dinov3_vitl16()
-
-    if WEIGHTS_PATH:
-        import torch
-        print(f"Loading weights from {WEIGHTS_PATH}")
-        state_dict = torch.load(WEIGHTS_PATH, map_location='cpu')
-        if 'model' in state_dict:
-            state_dict = state_dict['model']
-
-        from dinov3_jax.utils import convert_pytorch_to_jax
-        jax_params = convert_pytorch_to_jax(state_dict)
-        model = model.load_state_dict(jax_params)
-        del jax_params, state_dict
+    model = load_dinov3(MODEL_PATH, dtype=jnp.float32)
 
     print("Extracting features...")
-    features = extract_features(model, image_tensor, embed_dim=1024)
+    features = extract_features(model, image_tensor, embed_dim=model.config.hidden_size)
     features_np = np.array(features)
     print(f"Feature grid: {features_np.shape} ({features_np.shape[1]}x{features_np.shape[0]} patches)")
 

@@ -405,6 +405,8 @@ def main():
         """
         if state.vis is None or not dpg.is_mouse_button_down(0):
             return
+        if not dpg.is_item_hovered("main_plot"):
+            return
 
         mouse_pos = dpg.get_plot_mouse_pos()
         x, y = mouse_pos

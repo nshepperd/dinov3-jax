@@ -17,9 +17,7 @@ from dinov3_jax.layers.layer import Dinov3VitLayer
 from dinov3_jax.layers.rms_norm import LayerNorm
 
 
-@jax.tree_util.register_dataclass
-@dataclass
-class Dinov3VitOutput:
+class Dinov3VitOutput(eqx.Module):
     """Output of Dinov3VitModel, matching HF BaseModelOutputWithPooling."""
 
     last_hidden_state: Array  # (B, 1 + num_register + num_patches, hidden_size)

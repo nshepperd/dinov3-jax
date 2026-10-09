@@ -151,6 +151,10 @@ def extract_features(model, image_tensor, embed_dim):
     """Extract features from the model."""
     n_layers = len(model.layer)
 
+    def rms(x):
+        return jnp.sqrt(jnp.mean(x ** 2))
+    print('pooler_output:', rms(model(image_tensor.astype(jnp.float32)).pooler_output))
+
     @pjit
     def fwd(model: Dinov3VitModel, image_tensor: Array) -> Array:
         features = model.get_intermediate_layers(

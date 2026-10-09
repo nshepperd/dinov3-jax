@@ -1,9 +1,9 @@
 """Tests comparing JAX DINOv3 model against HuggingFace PyTorch model with real weights."""
 
-import numpy as np
 import jax.numpy as jnp
-import torch
+import numpy as np
 import pytest
+import torch
 
 from dinov3_jax import load_dinov3
 
@@ -94,8 +94,10 @@ class TestSingleLayer:
         # Run first layer
         jax_out = jax_model.layer[0](jax_emb, position_embeddings=(cos_jax, sin_jax))
 
+        # newer transformers (seen in 5.18) moved the layers into an encoder at hf_model.model
+        hf_layers = getattr(hf_model, "model", hf_model).layer
         with torch.no_grad():
-            hf_out = hf_model.layer[0](hf_emb, position_embeddings=(cos_pt, sin_pt))
+            hf_out = hf_layers[0](hf_emb, position_embeddings=(cos_pt, sin_pt))
 
         np.testing.assert_allclose(
             np.array(jax_out), hf_out.numpy(), atol=1e-3,
@@ -156,3 +158,23 @@ class TestFullModel:
             atol=1e-4,
             err_msg="Different resolution last_hidden_state mismatch",
         )
+
+
+class TestFlashAttention:
+    def test_forward(self, models, sample_input):
+        """Full forward pass with the fa4_jax flash path.
+
+        The kernel computes in float16, so compare by per-token cosine
+        similarity rather than the eager path's tight atol.
+        """
+        _, hf_model = models
+        flash_model = load_dinov3(VITB16_PATH, dtype=jnp.float32, use_flash_attn=True)
+
+        jax_out = np.array(flash_model(jnp.array(sample_input)).last_hidden_state)
+
+        with torch.no_grad():
+            hf_out = hf_model(torch.from_numpy(sample_input)).last_hidden_state.numpy()
+
+        a = jax_out / np.linalg.norm(jax_out, axis=-1, keepdims=True)
+        b = hf_out / np.linalg.norm(hf_out, axis=-1, keepdims=True)
+        assert (a * b).sum(-1).min() > 0.9999

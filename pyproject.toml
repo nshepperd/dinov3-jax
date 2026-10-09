@@ -3,12 +3,13 @@ name = "dinov3-jax"
 version = "0.1.0"
 description = "DINOv3 jax port"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
-    "jax[cuda12]>=0.8.2",
+    "jax>=0.8.2",
     "torch",
     "torchvision",
-    "flash-attn-jax>=0.5.4",
+    "fa4-jax @ git+https://github.com/nshepperd/fa4-jax.git@main",
+    "cutejax>=0.1.5",
     "pytest",
     "numpy",
     "scipy",
@@ -22,12 +23,14 @@ dependencies = [
     "pydantic",
     "equinox",
     "safetensors",
-    "transformers",
+    "transformers>=4.56",  # first release with Dinov3VitModel
     "huggingface_hub",
 ]
 
 [dependency-groups]
 dev = [
+    "jax[cuda13]",
+    "nvidia-cutlass-dsl[cu13]>=4.7.0",
     "lovely-jax",
     "lovely-tensors",
     "dearpygui",
@@ -39,6 +42,15 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["dinov3_jax"]
+
+[tool.hatch]
+metadata.allow-direct-references = true
+
+[tool.uv]
+# cutejax (an fa4-jax dependency) is newly published on PyPI, so it sits
+# inside the global exclude-newer window; let through releases up to the date
+# this was added, and no later ones.
+exclude-newer-package = { cutejax = "2026-10-09" }
 
 [tool.ruff]
 ignore = ["F722"]

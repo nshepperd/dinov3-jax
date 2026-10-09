@@ -81,14 +81,14 @@ class Dinov3VitAttention(eqx.Module):
         return jnp.matmul(attn_weights, v)
 
     def _flash_attention(self, q: Array, k: Array, v: Array) -> Array:
-        """Flash attention via flash_attn_jax."""
-        from flash_attn_jax import flash_mha
+        """Flash attention via fa4_jax."""
+        from fa4_jax import flash_attn
 
         dtype = q.dtype
-        # flash_mha expects (B, N, H, D) layout
+        # flash_attn expects (B, N, H, D) layout
         q = q.transpose(0, 2, 1, 3).astype(jnp.float16)
         k = k.transpose(0, 2, 1, 3).astype(jnp.float16)
         v = v.transpose(0, 2, 1, 3).astype(jnp.float16)
-        out = flash_mha(q, k, v).astype(dtype)
+        out = flash_attn(q, k, v).astype(dtype)
         # Back to (B, H, N, D)
         return out.transpose(0, 2, 1, 3)

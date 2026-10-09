@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import jax
 import equinox as eqx
+import jax
 import jax.numpy as jnp
 from jaxtyping import Array
 
-from dinov3_jax.eepynox.nn.linear import Linear
 from dinov3_jax.config import Dinov3VitConfig
+from dinov3_jax.eepynox.nn.linear import Linear
 from dinov3_jax.layers.rope import apply_rotary_pos_emb
 
 

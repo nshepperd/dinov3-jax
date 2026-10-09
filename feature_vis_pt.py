@@ -12,14 +12,10 @@ model.requires_grad_(False)
 # model.requires_grad_(False)
 
 # %%
-import torchvision
-import torchvision.transforms as transforms
+import einops
 import torchvision.transforms.functional as TF
 from PIL import Image
-import urllib
 from sklearn.decomposition import PCA
-from scipy import signal
-import einops
 
 # examples of available DINOv3 models:
 MODEL_DINOV3_VITS = "dinov3_vits16"
@@ -73,20 +69,19 @@ n_layers = MODEL_TO_NUM_LAYERS[MODEL_NAME]
 # n_layers = 4
 
 
-with torch.inference_mode():
-    with torch.autocast(device_type='cuda', dtype=torch.float32):
-        feats = model.get_intermediate_layers(image_resized_norm.unsqueeze(0).cuda(), n=range(n_layers), reshape=True, norm=True)
-        x = feats[-1].squeeze().detach().cpu()
-        # x = x.movedim(0,-1) # for convnext
-        dim = x.shape[0]
-        x = x.view(dim, -1).permute(1, 0)
+with torch.inference_mode(), torch.autocast(device_type='cuda', dtype=torch.float32):
+    feats = model.get_intermediate_layers(image_resized_norm.unsqueeze(0).cuda(), n=range(n_layers), reshape=True, norm=True)
+    x = feats[-1].squeeze().detach().cpu()
+    # x = x.movedim(0,-1) # for convnext
+    dim = x.shape[0]
+    x = x.view(dim, -1).permute(1, 0)
 
 x = einops.rearrange(x, '(h w) d -> h w d', h=image_resized_norm.shape[1] // PATCH_SIZE, w=image_resized_norm.shape[2] // PATCH_SIZE)
-x.shape
+x.shape  # noqa: B018
 
 
 # %%
-x.shape
+x.shape  # noqa: B018
 pca = PCA(n_components=3, whiten=True)
 pca.fit(x.reshape(-1, x.shape[-1]))
 
@@ -107,20 +102,21 @@ projected_image = torch.nn.functional.sigmoid(projected_image.mul(2.0)).permute(
 
 # enjoy
 from matplotlib import pyplot as plt
+
 plt.figure(dpi=300)
 plt.imshow(projected_image.permute(1, 2, 0))
 plt.axis('off')
 plt.show()
 
 # %%
-import numpy as np
+import ipywidgets as widgets
 import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
+import numpy as np
 import torch
 import torch.nn.functional as F
-from ipywidgets import interact, interactive, fixed, interact_manual
-import ipywidgets as widgets
 from IPython.display import display
+from ipywidgets import interactive
+
 
 class InteractiveSimilarityMap:
     def __init__(self, features, title="DINOv3 Feature Similarity Map"):
@@ -195,8 +191,8 @@ class InteractiveSimilarityMap:
             return
         
         # Get clicked coordinates
-        col = int(round(event.xdata))
-        row = int(round(event.ydata))
+        col = round(event.xdata)
+        row = round(event.ydata)
         
         # Bounds checking
         if 0 <= row < self.H and 0 <= col < self.W:
@@ -238,7 +234,7 @@ def create_widget_interface(features, title="DINOv3 Feature Similarity Map"):
         ax.set_ylabel('Height')
         
         # Colorbar
-        cbar = fig.colorbar(im, ax=ax, label='Cosine Similarity')
+        fig.colorbar(im, ax=ax, label='Cosine Similarity')
         
         plt.tight_layout()
         plt.show()
@@ -267,7 +263,8 @@ def demo_with_random_features():
     
     print("Method 1: Click-based interaction")
     print("Click anywhere on the heatmap to set new target pixel")
-    sim_map = InteractiveSimilarityMap(features)
+    # Keep a reference so the click callbacks aren't garbage collected.
+    _sim_map = InteractiveSimilarityMap(features)
     plt.show()
     
     print("\nMethod 2: Widget-based interaction")
@@ -352,6 +349,7 @@ analyze_dinov3_features(x)
 
 # %%
 from PIL import Image
+
 mask = Image.open('/home/em/mask.png')
 mask = mask.resize((x.shape[1], x.shape[0]))
 mask = TF.to_tensor(mask)
@@ -428,7 +426,7 @@ def plot_mask_similarity(features, mask, title="Mask-based Similarity", figsize=
     ax.set_ylabel('Height')
     
     # Colorbar
-    cbar = fig.colorbar(im, ax=ax, label='Cosine Similarity')
+    fig.colorbar(im, ax=ax, label='Cosine Similarity')
     
     plt.tight_layout()
     plt.show()

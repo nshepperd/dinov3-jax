@@ -1,14 +1,14 @@
-from typing import overload, ParamSpec, TypeVar, Callable
 import functools
+from collections.abc import Callable
+from typing import overload
+
 import jax
 
-P = ParamSpec("P")
-R = TypeVar("R")
 
 @overload
-def pjit(func: Callable[P, R], **kwargs) -> Callable[P, R]: ...
+def pjit[**P, R](func: Callable[P, R], **kwargs) -> Callable[P, R]: ...
 @overload
-def pjit(func: None = None, **kwargs) -> Callable[[Callable[P, R]], Callable[P, R]]: ...
+def pjit[**P, R](func: None = None, **kwargs) -> Callable[[Callable[P, R]], Callable[P, R]]: ...
 
 def pjit(func=None, **kwargs):
     if func is None:

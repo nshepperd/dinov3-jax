@@ -5,8 +5,8 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array
 
-from dinov3_jax.eepynox.nn.linear import Linear
 from dinov3_jax.config import Dinov3VitConfig
+from dinov3_jax.eepynox.nn.linear import Linear
 
 
 class Dinov3VitMLP(eqx.Module):

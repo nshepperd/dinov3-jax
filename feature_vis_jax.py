@@ -1,18 +1,17 @@
 # %%
+import ipywidgets as widgets
 import jax
 import jax.numpy as jnp
-import numpy as np
-from PIL import Image
-import einops
-
-# JAX DINOv3 imports
-from dinov3_jax import dinov3_vits16, dinov3_vitl16
 
 # Visualization imports
 import matplotlib.pyplot as plt
-from ipywidgets import interact, interactive, fixed, interact_manual
-import ipywidgets as widgets
+import numpy as np
 from IPython.display import display
+from ipywidgets import interactive
+from PIL import Image
+
+# JAX DINOv3 imports
+from dinov3_jax import dinov3_vitl16, dinov3_vits16
 
 # %%
 # Configuration
@@ -103,8 +102,8 @@ if WEIGHTS_PATH:
     if 'model' in state_dict:
         state_dict = state_dict['model']
     
-    from dinov3_jax.utils import convert_pytorch_to_jax
     from dinov3_jax.eepynox.nn.param import load_state_dict
+    from dinov3_jax.utils import convert_pytorch_to_jax
     jax_params = convert_pytorch_to_jax(state_dict)
     
     model = load_state_dict(model, jax_params)
@@ -223,7 +222,7 @@ def create_widget_interface(features, title="DINOv3 Feature Similarity Map (JAX)
         ax2.grid(True, alpha=0.3)
         
         # Colorbar
-        cbar = fig.colorbar(im, ax=ax2, label='Cosine Similarity')
+        fig.colorbar(im, ax=ax2, label='Cosine Similarity')
         
         # Add similarity statistics
         fig.suptitle(f'Similarity Stats - Min: {similarity_map.min():.3f}, '
@@ -341,7 +340,7 @@ def quick_similarity_plot(features, target_row=None, target_col=None, figsize=(1
     similarity_map = similarities.reshape(H, W)
     
     # Plot
-    fig, axes = plt.subplots(1, 2, figsize=figsize)
+    _fig, axes = plt.subplots(1, 2, figsize=figsize)
     
     # Left: Feature norms
     ax1 = axes[0]
@@ -355,7 +354,7 @@ def quick_similarity_plot(features, target_row=None, target_col=None, figsize=(1
     ax2 = axes[1]
     im2 = ax2.imshow(similarity_map, cmap='viridis', interpolation='nearest')
     ax2.plot(target_col, target_row, 'r+', markersize=15, markeredgewidth=3)
-    ax2.set_title(f'Cosine Similarity Map')
+    ax2.set_title('Cosine Similarity Map')
     plt.colorbar(im2, ax=ax2, label='Similarity')
     
     for ax in axes:

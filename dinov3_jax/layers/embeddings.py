@@ -4,9 +4,9 @@ import equinox as eqx
 import jax.numpy as jnp
 from jaxtyping import Array
 
+from dinov3_jax.config import Dinov3VitConfig
 from dinov3_jax.eepynox.nn.conv2d import Conv2d
 from dinov3_jax.eepynox.nn.param import Param
-from dinov3_jax.config import Dinov3VitConfig
 
 
 class Dinov3VitEmbeddings(eqx.Module):

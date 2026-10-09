@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import equinox as eqx
-import jax.numpy as jnp
 from jaxtyping import Array
 
 from dinov3_jax.eepynox.nn.param import Param

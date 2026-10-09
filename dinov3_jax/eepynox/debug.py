@@ -11,7 +11,7 @@ def maybe_debugpy_postmortem(excinfo):
     excinfo: A (type(e), e, e.__traceback__) tuple. See sys.exc_info()
     """
     try:
-        import debugpy
+        import debugpy  # noqa: T100
         pm = debugpy.trigger_exception_handler
     except (ImportError, AttributeError) as e:
         print(f"[DEBUGPY PM] Could not import debugpy.postmortem: {e}")

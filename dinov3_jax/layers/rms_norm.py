@@ -1,7 +1,8 @@
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array
-import equinox as eqx
+
 from dinov3_jax.eepynox.nn.param import Param
 
 

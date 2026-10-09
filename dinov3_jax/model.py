@@ -1,9 +1,6 @@
 from __future__ import annotations
-from dinov3_jax.utils.pjit import pjit
-import jax
 
-from dataclasses import dataclass
-from typing import Sequence
+from collections.abc import Sequence
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -11,9 +8,10 @@ from jaxtyping import Array
 
 from dinov3_jax.config import Dinov3VitConfig
 from dinov3_jax.layers.embeddings import Dinov3VitEmbeddings
-from dinov3_jax.layers.rope import Dinov3VitRopePositionEmbedding
 from dinov3_jax.layers.layer import Dinov3VitLayer
 from dinov3_jax.layers.rms_norm import LayerNorm
+from dinov3_jax.layers.rope import Dinov3VitRopePositionEmbedding
+from dinov3_jax.utils.pjit import pjit
 
 
 class Dinov3VitOutput(eqx.Module):

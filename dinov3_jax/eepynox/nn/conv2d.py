@@ -1,10 +1,12 @@
+import math
+
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-from jaxtyping import Float, Array, PRNGKeyArray
-import equinox as eqx
+from jaxtyping import Array, Float, PRNGKeyArray
+
 import dinov3_jax.eepynox.utils as eu
 from dinov3_jax.eepynox.nn.param import Param
-import math
 
 
 class Conv2d(eqx.Module):

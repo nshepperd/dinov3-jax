@@ -5,10 +5,10 @@ import jax.numpy as jnp
 from jaxtyping import Array
 
 from dinov3_jax.config import Dinov3VitConfig
-from dinov3_jax.layers.rms_norm import LayerNorm
 from dinov3_jax.layers.attention import Dinov3VitAttention
 from dinov3_jax.layers.layer_scale import Dinov3VitLayerScale
-from dinov3_jax.layers.mlp import Dinov3VitMLP, Dinov3VitGatedMLP
+from dinov3_jax.layers.mlp import Dinov3VitGatedMLP, Dinov3VitMLP
+from dinov3_jax.layers.rms_norm import LayerNorm
 
 
 class Dinov3VitLayer(eqx.Module):

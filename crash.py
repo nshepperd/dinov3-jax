@@ -1,8 +1,4 @@
-import sys
-import pytest
-
 from dinov3_jax.eepynox.debug import debugpy_pm
-
 
 # @pytest.hookimpl(tryfirst=True)
 # def pytest_exception_interact(call: pytest.CallInfo):

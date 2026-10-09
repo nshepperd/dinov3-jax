@@ -1,6 +1,6 @@
 from collections import OrderedDict
+from collections.abc import Callable
 from functools import partial, wraps
-from typing import Callable, ParamSpec, TypeVar
 
 import jax
 import jax.extend.core
@@ -38,9 +38,7 @@ def _label_jvp(primals, tangents, *, name: str):
     y = label(x, name=name)
     return y, t
 
-P = ParamSpec("P")
-R = TypeVar("R")
-def collect(fn: Callable[P, R], static_argnames=()) -> Callable[P, tuple[R, OrderedDict[str, jax.Array]]]:
+def collect[**P, R](fn: Callable[P, R], static_argnames=()) -> Callable[P, tuple[R, OrderedDict[str, jax.Array]]]:
     """label/collect: return extra outputs from inside a jax computation.
     
     Useful for unit testing models under jax transforms where we can't just 

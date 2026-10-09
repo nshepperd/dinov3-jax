@@ -132,7 +132,7 @@ class TestFullModel:
         )
 
     def test_output_shapes(self, models, sample_input):
-        jax_model, hf_model = models
+        jax_model, _hf_model = models
 
         jax_out = jax_model(jnp.array(sample_input))
 

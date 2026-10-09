@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import jax.numpy as jnp
-import numpy as np
 from safetensors.numpy import load_file
 
 from dinov3_jax.config import Dinov3VitConfig

@@ -1,13 +1,13 @@
-from jax import Array
-import dataclasses
-from functools import partial
-from typing import Callable, TypeVar, Any
+from typing import Any
 
-import torch
 import equinox as eqx
+import jax
+import torch
+from jax import Array
+
 import dinov3_jax.eepynox.utils as eu
 from dinov3_jax.eepynox.nn.param import Param
-import jax
+
 
 def collect_layers(model: torch.nn.Module, *args, **kwargs) -> tuple[Any, dict[str, tuple[tuple[Any,...], Any]]]:
     """Calls a pytorch module with given args and kwargs,

@@ -9,6 +9,8 @@ import os
 
 os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "cuda_async"
 os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.25"
+# Persist compiled executables (and XLA's GPU autotuning results) across runs.
+os.environ.setdefault("JAX_COMPILATION_CACHE_DIR", os.path.expanduser("~/.cache/jax"))
 
 import io
 import re

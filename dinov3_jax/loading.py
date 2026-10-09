@@ -31,7 +31,7 @@ def load_dinov3(
     config = Dinov3VitConfig.from_pretrained(model_path)
 
     # 2. Construct model (weights initialized to None)
-    model = Dinov3VitModel(config, use_flash_attn=use_flash_attn)
+    model = Dinov3VitModel(config, use_flash_attn=use_flash_attn, dtype=dtype)
 
     # 3. Load safetensors weights
     weights_path = model_path / "model.safetensors"

@@ -160,6 +160,63 @@ class TestFullModel:
         )
 
 
+class TestHalfPrecision:
+    @pytest.mark.parametrize("dtype, min_cos", [(jnp.float16, 0.9999), (jnp.bfloat16, 0.999)])
+    def test_forward(self, models, sample_input, dtype, min_cos):
+        """load_dinov3(dtype=...) casts every parameter and runs end to end in that dtype."""
+        import jax
+
+        _, hf_model = models
+        model = load_dinov3(VITB16_PATH, dtype=dtype, use_flash_attn=False)
+        leaves = [l for l in jax.tree_util.tree_leaves(model) if hasattr(l, "dtype")]
+        # inv_freq is RoPE's float32 frequency table, not a parameter
+        assert sum(l.dtype != dtype for l in leaves) == 1
+
+        out = model(jnp.array(sample_input, dtype=dtype)).last_hidden_state
+        assert out.dtype == dtype
+        out = np.array(out, dtype=np.float32)
+
+        with torch.no_grad():
+            hf_out = hf_model(torch.from_numpy(sample_input)).last_hidden_state.numpy()
+
+        a = out / np.linalg.norm(out, axis=-1, keepdims=True)
+        b = hf_out / np.linalg.norm(hf_out, axis=-1, keepdims=True)
+        assert (a * b).sum(-1).min() > min_cos
+
+
+class TestEagerAttention:
+    def test_float16_layer0(self, models, sample_input):
+        """Layer 0 logits reach ~1e6, beyond float16 range; the eager path must not overflow.
+
+        Rounding q/k to float16 already moves logits that large by tens, so the
+        reference is float32 attention on the same float16-rounded inputs.
+        """
+        from dinov3_jax.layers.rope import apply_rotary_pos_emb
+
+        jax_model, _ = models
+        x_jax = jnp.array(sample_input)
+        layer = jax_model.layer[0]
+        att = layer.attention
+
+        h = layer.norm1(jax_model.embeddings(x_jax))
+        cos, sin = jax_model.rope_embeddings(x_jax)
+        B, N, _ = h.shape
+
+        def heads(t):
+            return t.reshape(B, N, att.num_heads, att.head_dim).transpose(0, 2, 1, 3)
+
+        q, k = apply_rotary_pos_emb(heads(att.q_proj(h)), heads(att.k_proj(h)), cos, sin)
+        q, k, v = (t.transpose(0, 2, 1, 3).astype(jnp.float16) for t in (q, k, heads(att.v_proj(h))))
+
+        out = np.array(att._eager_attention(q, k, v), dtype=np.float32)
+        ref = np.array(att._eager_attention(*(t.astype(jnp.float32) for t in (q, k, v))))
+
+        assert not np.isnan(out).any()
+        a = out / np.linalg.norm(out, axis=-1, keepdims=True)
+        b = ref / np.linalg.norm(ref, axis=-1, keepdims=True)
+        assert (a * b).sum(-1).min() > 0.9999
+
+
 class TestFlashAttention:
     def test_forward(self, models, sample_input):
         """Full forward pass with the fa4_jax flash path.

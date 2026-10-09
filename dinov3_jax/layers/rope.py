@@ -81,8 +81,9 @@ def apply_rotary_pos_emb(
     q_prefix, q_patches = jnp.split(q, [num_prefix_tokens], axis=-2)
     k_prefix, k_patches = jnp.split(k, [num_prefix_tokens], axis=-2)
 
-    q_patches = (q_patches * cos) + (rotate_half(q_patches) * sin)
-    k_patches = (k_patches * cos) + (rotate_half(k_patches) * sin)
+    # cos/sin are float32; cast back so half-precision q/k stay half precision
+    q_patches = ((q_patches * cos) + (rotate_half(q_patches) * sin)).astype(q.dtype)
+    k_patches = ((k_patches * cos) + (rotate_half(k_patches) * sin)).astype(k.dtype)
 
     q = jnp.concatenate([q_prefix, q_patches], axis=-2)
     k = jnp.concatenate([k_prefix, k_patches], axis=-2)

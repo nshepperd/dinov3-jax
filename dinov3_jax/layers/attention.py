@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import math
-
 import jax
 import equinox as eqx
 import jax.numpy as jnp
@@ -25,16 +23,16 @@ class Dinov3VitAttention(eqx.Module):
     embed_dim: int = eqx.field(static=True)
     use_flash_attn: bool = eqx.field(static=True)
 
-    def __init__(self, config: Dinov3VitConfig, use_flash_attn: bool = True):
+    def __init__(self, config: Dinov3VitConfig, use_flash_attn: bool = True, dtype=jnp.float32):
         self.embed_dim = config.hidden_size
         self.num_heads = config.num_attention_heads
         self.head_dim = config.hidden_size // config.num_attention_heads
         self.use_flash_attn = use_flash_attn
 
-        self.q_proj = Linear(self.embed_dim, self.embed_dim, use_bias=config.query_bias)
-        self.k_proj = Linear(self.embed_dim, self.embed_dim, use_bias=config.key_bias)
-        self.v_proj = Linear(self.embed_dim, self.embed_dim, use_bias=config.value_bias)
-        self.o_proj = Linear(self.embed_dim, self.embed_dim, use_bias=config.proj_bias)
+        self.q_proj = Linear(self.embed_dim, self.embed_dim, use_bias=config.query_bias, dtype=dtype)
+        self.k_proj = Linear(self.embed_dim, self.embed_dim, use_bias=config.key_bias, dtype=dtype)
+        self.v_proj = Linear(self.embed_dim, self.embed_dim, use_bias=config.value_bias, dtype=dtype)
+        self.o_proj = Linear(self.embed_dim, self.embed_dim, use_bias=config.proj_bias, dtype=dtype)
 
     def load_state_dict(self, state_dict: dict[str, Array], prefix: str = "") -> Dinov3VitAttention:
         q_proj = self.q_proj.load_state_dict(state_dict, prefix=prefix + "q_proj.")
@@ -63,32 +61,30 @@ class Dinov3VitAttention(eqx.Module):
         cos, sin = position_embeddings
         q, k = apply_rotary_pos_emb(q, k, cos, sin)
 
+        # Both attention paths take (B, N, num_heads, head_dim)
+        q, k, v = (t.transpose(0, 2, 1, 3) for t in (q, k, v))
         if self.use_flash_attn:
             attn_out = self._flash_attention(q, k, v)
         else:
             attn_out = self._eager_attention(q, k, v)
 
         # Reshape back to (B, N, hidden_size)
-        attn_out = attn_out.transpose(0, 2, 1, 3).reshape(B, N, -1)
+        attn_out = attn_out.reshape(B, N, -1)
         attn_out = self.o_proj(attn_out)
         return attn_out
 
     def _eager_attention(self, q: Array, k: Array, v: Array) -> Array:
-        """Standard scaled dot-product attention."""
-        scale = math.sqrt(self.head_dim)
-        attn_weights = jnp.matmul(q, k.transpose(0, 1, 3, 2)) / scale
-        attn_weights = jax.nn.softmax(attn_weights, axis=-1)
-        return jnp.matmul(attn_weights, v)
+        """Scaled dot-product attention via XLA.
+
+        Logits and softmax are computed in float32 (layer 0 logits reach ~1e6,
+        which overflows float16).
+        """
+        return jax.nn.dot_product_attention(q, k, v)
 
     def _flash_attention(self, q: Array, k: Array, v: Array) -> Array:
         """Flash attention via fa4_jax."""
         from fa4_jax import flash_attn
 
         dtype = q.dtype
-        # flash_attn expects (B, N, H, D) layout
-        q = q.transpose(0, 2, 1, 3).astype(jnp.float16)
-        k = k.transpose(0, 2, 1, 3).astype(jnp.float16)
-        v = v.transpose(0, 2, 1, 3).astype(jnp.float16)
-        out = flash_attn(q, k, v).astype(dtype)
-        # Back to (B, H, N, D)
-        return out.transpose(0, 2, 1, 3)
+        out = flash_attn(q.astype(jnp.float16), k.astype(jnp.float16), v.astype(jnp.float16))
+        return out.astype(dtype)

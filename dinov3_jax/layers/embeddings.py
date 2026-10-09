@@ -19,7 +19,7 @@ class Dinov3VitEmbeddings(eqx.Module):
     num_register_tokens: int = eqx.field(static=True)
     hidden_size: int = eqx.field(static=True)
 
-    def __init__(self, config: Dinov3VitConfig):
+    def __init__(self, config: Dinov3VitConfig, dtype=jnp.float32):
         self.num_register_tokens = config.num_register_tokens
         self.hidden_size = config.hidden_size
         self.cls_token = None
@@ -30,6 +30,7 @@ class Dinov3VitEmbeddings(eqx.Module):
             out_features=config.hidden_size,
             kernel_size=config.patch_size,
             stride=config.patch_size,
+            dtype=dtype,
         )
 
     def load_state_dict(self, state_dict: dict[str, Array], prefix: str = "") -> Dinov3VitEmbeddings:

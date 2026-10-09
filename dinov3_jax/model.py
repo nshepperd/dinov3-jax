@@ -33,12 +33,12 @@ class Dinov3VitModel(eqx.Module):
     norm: LayerNorm
     config: Dinov3VitConfig = eqx.field(static=True)
 
-    def __init__(self, config: Dinov3VitConfig, use_flash_attn: bool = True):
+    def __init__(self, config: Dinov3VitConfig, use_flash_attn: bool = True, dtype=jnp.float32):
         self.config = config
-        self.embeddings = Dinov3VitEmbeddings(config)
+        self.embeddings = Dinov3VitEmbeddings(config, dtype=dtype)
         self.rope_embeddings = Dinov3VitRopePositionEmbedding(config)
-        self.layer = [Dinov3VitLayer(config, use_flash_attn=use_flash_attn) for _ in range(config.num_hidden_layers)]
-        self.norm = LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.layer = [Dinov3VitLayer(config, use_flash_attn=use_flash_attn, dtype=dtype) for _ in range(config.num_hidden_layers)]
+        self.norm = LayerNorm(config.hidden_size, eps=config.layer_norm_eps, dtype=dtype)
 
     def load_state_dict(self, state_dict: dict[str, Array], prefix: str = "") -> Dinov3VitModel:
         embeddings = self.embeddings.load_state_dict(state_dict, prefix=prefix + "embeddings.")

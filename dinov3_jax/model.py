@@ -9,7 +9,6 @@ import equinox as eqx
 import jax.numpy as jnp
 from jaxtyping import Array
 
-import dinov3_jax.eepynox.utils as eu
 from dinov3_jax.config import Dinov3VitConfig
 from dinov3_jax.layers.embeddings import Dinov3VitEmbeddings
 from dinov3_jax.layers.rope import Dinov3VitRopePositionEmbedding
@@ -39,14 +38,6 @@ class Dinov3VitModel(eqx.Module):
         self.rope_embeddings = Dinov3VitRopePositionEmbedding(config)
         self.layer = [Dinov3VitLayer(config, use_flash_attn=use_flash_attn, dtype=dtype) for _ in range(config.num_hidden_layers)]
         self.norm = LayerNorm(config.hidden_size, eps=config.layer_norm_eps, dtype=dtype)
-
-    def load_state_dict(self, state_dict: dict[str, Array], prefix: str = "") -> Dinov3VitModel:
-        embeddings = self.embeddings.load_state_dict(state_dict, prefix=prefix + "embeddings.")
-        layers = []
-        for i, layer_module in enumerate(self.layer):
-            layers.append(layer_module.load_state_dict(state_dict, prefix=prefix + f"layer.{i}."))
-        norm = self.norm.load_state_dict(state_dict, prefix=prefix + "norm.")
-        return eu.replace(self, embeddings=embeddings, layer=layers, norm=norm)
 
     @pjit
     def __call__(self, pixel_values: Array) -> Dinov3VitOutput:

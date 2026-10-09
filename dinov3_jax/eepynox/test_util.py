@@ -6,6 +6,7 @@ from typing import Callable, TypeVar, Any
 import torch
 import equinox as eqx
 import dinov3_jax.eepynox.utils as eu
+from dinov3_jax.eepynox.nn.param import Param
 import jax
 
 def collect_layers(model: torch.nn.Module, *args, **kwargs) -> tuple[Any, dict[str, tuple[tuple[Any,...], Any]]]:
@@ -60,6 +61,8 @@ def collect_layers_eqx(
     collected: dict[str, tuple[tuple[Any,...], Any]] = {}
 
     def wrap_module(path: jax.tree_util.KeyPath, module: eqx.Module) -> eqx.Module:
+        if isinstance(module, Param):
+            return module
         name = jax.tree_util.keystr(path, separator='.', simple=True)
         return WrapModule(name, module, collected)
 

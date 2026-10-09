@@ -5,7 +5,6 @@ import equinox as eqx
 import jax.numpy as jnp
 from jaxtyping import Array
 
-import dinov3_jax.eepynox.utils as eu
 from dinov3_jax.eepynox.nn.linear import Linear
 from dinov3_jax.config import Dinov3VitConfig
 from dinov3_jax.layers.rope import apply_rotary_pos_emb
@@ -33,13 +32,6 @@ class Dinov3VitAttention(eqx.Module):
         self.k_proj = Linear(self.embed_dim, self.embed_dim, use_bias=config.key_bias, dtype=dtype)
         self.v_proj = Linear(self.embed_dim, self.embed_dim, use_bias=config.value_bias, dtype=dtype)
         self.o_proj = Linear(self.embed_dim, self.embed_dim, use_bias=config.proj_bias, dtype=dtype)
-
-    def load_state_dict(self, state_dict: dict[str, Array], prefix: str = "") -> Dinov3VitAttention:
-        q_proj = self.q_proj.load_state_dict(state_dict, prefix=prefix + "q_proj.")
-        k_proj = self.k_proj.load_state_dict(state_dict, prefix=prefix + "k_proj.")
-        v_proj = self.v_proj.load_state_dict(state_dict, prefix=prefix + "v_proj.")
-        o_proj = self.o_proj.load_state_dict(state_dict, prefix=prefix + "o_proj.")
-        return eu.replace(self, q_proj=q_proj, k_proj=k_proj, v_proj=v_proj, o_proj=o_proj)
 
     def __call__(
         self,

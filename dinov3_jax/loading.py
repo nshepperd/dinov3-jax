@@ -7,6 +7,7 @@ import numpy as np
 from safetensors.numpy import load_file
 
 from dinov3_jax.config import Dinov3VitConfig
+from dinov3_jax.eepynox.nn.param import load_state_dict
 from dinov3_jax.model import Dinov3VitModel
 
 
@@ -43,6 +44,6 @@ def load_dinov3(
         jax_params[key] = jnp.array(value, dtype=dtype)
 
     # 5. Load into model via load_state_dict
-    model = model.load_state_dict(jax_params)
+    model = load_state_dict(model, jax_params)
 
     return model

@@ -2,13 +2,9 @@
 
 ## What This Is
 
-JAX/Equinox port of DINOv3 (self-supervised vision transformer), structured to follow the HuggingFace `transformers` implementation. Inference-only — `load_dinov3(model_path)` reads an HF model directory (`config.json` + `model.safetensors`), builds `Dinov3VitModel`, and loads weights via `load_state_dict`. Interactive visualizer (`vis_dpg.py`) lets you click patches to see cosine similarity heatmaps; images can be pasted with Ctrl+V.
+JAX/Equinox port of DINOv3 (self-supervised vision transformer), structured to follow the HuggingFace `transformers` implementation. Inference-only — `load_dinov3(model_path)` reads an HF model directory (`config.json` + `model.safetensors`), builds `Dinov3VitModel`, and loads weights via `load_state_dict(model, state_dict)`, which fills every `Param` from the state dict key matching its module path (e.g. `layer.0.attention.q_proj.weight`). Interactive visualizer (`vis_dpg.py`) lets you click patches to see cosine similarity heatmaps; images can be pasted with Ctrl+V.
 
 ## What Still Needs Work
-
-### Boilerplate Reduction
-
-**`load_state_dict` is hand-written in every module.** Each layer follows the same pattern: assert shapes, pop keys, call `eu.replace`. A generic recursive implementation would eliminate most of this. The `state_dict.pop()` calls mutate the caller's dict as a side effect (harmless from `load_dinov3`, which passes a freshly built dict, but surprising for direct callers) — should use `[]` indexing or document this.
 
 ### API Design
 
@@ -43,6 +39,7 @@ dinov3_jax/
     pjit.py              - pjit decorator
   eepynox/               - Custom Equinox utilities
     utils.py             - replace(), new(), mapmod()
+    nn/param.py          - Param (one weight array), load_state_dict(), state_dict()
     nn/linear.py         - Linear layer
     nn/conv2d.py         - Conv2d layer
     nn/activation.py     - Activations

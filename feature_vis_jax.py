@@ -104,9 +104,10 @@ if WEIGHTS_PATH:
         state_dict = state_dict['model']
     
     from dinov3_jax.utils import convert_pytorch_to_jax
+    from dinov3_jax.eepynox.nn.param import load_state_dict
     jax_params = convert_pytorch_to_jax(state_dict)
     
-    model = model.load_state_dict(jax_params)
+    model = load_state_dict(model, jax_params)
     # Update params with loaded weights
     # for param_name, param in model.gen_named_parameters():
     #     if param_name in jax_params:

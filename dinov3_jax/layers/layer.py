@@ -4,7 +4,6 @@ import equinox as eqx
 import jax.numpy as jnp
 from jaxtyping import Array
 
-import dinov3_jax.eepynox.utils as eu
 from dinov3_jax.config import Dinov3VitConfig
 from dinov3_jax.layers.rms_norm import LayerNorm
 from dinov3_jax.layers.attention import Dinov3VitAttention
@@ -32,19 +31,6 @@ class Dinov3VitLayer(eqx.Module):
         else:
             self.mlp = Dinov3VitMLP(config, dtype=dtype)
         self.layer_scale2 = Dinov3VitLayerScale(config.hidden_size)
-
-    def load_state_dict(self, state_dict: dict[str, Array], prefix: str = "") -> Dinov3VitLayer:
-        norm1 = self.norm1.load_state_dict(state_dict, prefix=prefix + "norm1.")
-        attention = self.attention.load_state_dict(state_dict, prefix=prefix + "attention.")
-        layer_scale1 = self.layer_scale1.load_state_dict(state_dict, prefix=prefix + "layer_scale1.")
-        norm2 = self.norm2.load_state_dict(state_dict, prefix=prefix + "norm2.")
-        mlp = self.mlp.load_state_dict(state_dict, prefix=prefix + "mlp.")
-        layer_scale2 = self.layer_scale2.load_state_dict(state_dict, prefix=prefix + "layer_scale2.")
-        return eu.replace(
-            self,
-            norm1=norm1, attention=attention, layer_scale1=layer_scale1,
-            norm2=norm2, mlp=mlp, layer_scale2=layer_scale2,
-        )
 
     def __call__(
         self,

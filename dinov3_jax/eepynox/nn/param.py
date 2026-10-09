@@ -55,7 +55,9 @@ def _path_str(path: jax.tree_util.KeyPath) -> str:
     return jax.tree_util.keystr(path, simple=True, separator=".")
 
 
-def load_state_dict[T](module: T, state_dict: Mapping[str, Array], strict: bool = True) -> T:
+def load_state_dict[T](
+    module: T, state_dict: Mapping[str, Array], strict: bool = True
+) -> T:
     """Returns `module` with every Param loaded from `state_dict` by its module path.
 
     Missing keys raise KeyError. With `strict`, keys in `state_dict` that no

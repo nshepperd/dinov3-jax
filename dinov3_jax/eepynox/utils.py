@@ -17,8 +17,11 @@ def replace[T: eqx.Module](module: T, **changes) -> T:
             object.__setattr__(ret, field.name, getattr(module, field.name))
     field_names = {field.name for field in dataclasses.fields(cls)}
     if any(k not in field_names for k in changes):
-        raise ValueError(f"Invalid field names in changes: {set(changes.keys()) - field_names}")
+        raise ValueError(
+            f"Invalid field names in changes: {set(changes.keys()) - field_names}"
+        )
     return ret
+
 
 def new[T: eqx.Module](cls: type[T], /, **kwargs) -> T:
     ret = object.__new__(cls)
@@ -33,19 +36,23 @@ def new[T: eqx.Module](cls: type[T], /, **kwargs) -> T:
             raise TypeError(f"Missing value for field {field.name}")
     return ret
 
-def mapmod[T: eqx.Module](
-    fn: Callable[[eqx.Module], eqx.Module],
-    module: T
-) -> T:
+
+def mapmod[T: eqx.Module](fn: Callable[[eqx.Module], eqx.Module], module: T) -> T:
     """Applies `fn` to every submodule in `module` and then to `module` itself.
-    
+
     Bottom-up recursion, like a catamorphism.
     """
+
     def proc(module):
         if not isinstance(module, eqx.Module):
             return module
-        module = jax.tree_util.tree_map(proc, module, is_leaf=lambda m: isinstance(m, eqx.Module) and m is not module)
+        module = jax.tree_util.tree_map(
+            proc,
+            module,
+            is_leaf=lambda m: isinstance(m, eqx.Module) and m is not module,
+        )
         return fn(module)
+
     return proc(module)
 
 

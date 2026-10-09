@@ -21,11 +21,19 @@ class Dinov3VitLayer(eqx.Module):
     mlp: Dinov3VitMLP | Dinov3VitGatedMLP
     layer_scale2: Dinov3VitLayerScale
 
-    def __init__(self, config: Dinov3VitConfig, use_flash_attn: bool = True, dtype=jnp.float32):
-        self.norm1 = LayerNorm(config.hidden_size, eps=config.layer_norm_eps, dtype=dtype)
-        self.attention = Dinov3VitAttention(config, use_flash_attn=use_flash_attn, dtype=dtype)
+    def __init__(
+        self, config: Dinov3VitConfig, use_flash_attn: bool = True, dtype=jnp.float32
+    ):
+        self.norm1 = LayerNorm(
+            config.hidden_size, eps=config.layer_norm_eps, dtype=dtype
+        )
+        self.attention = Dinov3VitAttention(
+            config, use_flash_attn=use_flash_attn, dtype=dtype
+        )
         self.layer_scale1 = Dinov3VitLayerScale(config.hidden_size)
-        self.norm2 = LayerNorm(config.hidden_size, eps=config.layer_norm_eps, dtype=dtype)
+        self.norm2 = LayerNorm(
+            config.hidden_size, eps=config.layer_norm_eps, dtype=dtype
+        )
         if config.use_gated_mlp:
             self.mlp = Dinov3VitGatedMLP(config, dtype=dtype)
         else:
@@ -40,7 +48,9 @@ class Dinov3VitLayer(eqx.Module):
         # Attention with residual
         residual = hidden_states
         hidden_states = self.norm1(hidden_states)
-        hidden_states = self.attention(hidden_states, position_embeddings=position_embeddings)
+        hidden_states = self.attention(
+            hidden_states, position_embeddings=position_embeddings
+        )
         hidden_states = self.layer_scale1(hidden_states)
         hidden_states = hidden_states + residual
 

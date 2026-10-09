@@ -30,12 +30,19 @@ class Dinov3VitModel(eqx.Module):
     norm: LayerNorm
     config: Dinov3VitConfig = eqx.field(static=True)
 
-    def __init__(self, config: Dinov3VitConfig, use_flash_attn: bool = True, dtype=jnp.float32):
+    def __init__(
+        self, config: Dinov3VitConfig, use_flash_attn: bool = True, dtype=jnp.float32
+    ):
         self.config = config
         self.embeddings = Dinov3VitEmbeddings(config, dtype=dtype)
         self.rope_embeddings = Dinov3VitRopePositionEmbedding(config)
-        self.layer = [Dinov3VitLayer(config, use_flash_attn=use_flash_attn, dtype=dtype) for _ in range(config.num_hidden_layers)]
-        self.norm = LayerNorm(config.hidden_size, eps=config.layer_norm_eps, dtype=dtype)
+        self.layer = [
+            Dinov3VitLayer(config, use_flash_attn=use_flash_attn, dtype=dtype)
+            for _ in range(config.num_hidden_layers)
+        ]
+        self.norm = LayerNorm(
+            config.hidden_size, eps=config.layer_norm_eps, dtype=dtype
+        )
 
     @pjit
     def __call__(self, pixel_values: Array) -> Dinov3VitOutput:
@@ -43,7 +50,9 @@ class Dinov3VitModel(eqx.Module):
         position_embeddings = self.rope_embeddings(pixel_values)
 
         for layer_module in self.layer:
-            hidden_states = layer_module(hidden_states, position_embeddings=position_embeddings)
+            hidden_states = layer_module(
+                hidden_states, position_embeddings=position_embeddings
+            )
 
         sequence_output = self.norm(hidden_states)
         pooler_output = sequence_output[:, 0, :]
@@ -83,7 +92,9 @@ class Dinov3VitModel(eqx.Module):
 
         outputs = []
         for i, layer_module in enumerate(self.layer):
-            hidden_states = layer_module(hidden_states, position_embeddings=position_embeddings)
+            hidden_states = layer_module(
+                hidden_states, position_embeddings=position_embeddings
+            )
             if i in layers_to_take:
                 outputs.append(hidden_states)
 

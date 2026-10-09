@@ -32,7 +32,9 @@ from dinov3_jax.utils.pjit import pjit
 # Configuration
 PATCH_SIZE = 16
 IMAGE_SIZE = 768  # Display size (height)
-FEATURE_SCALE = 4.0  # Scale factor for feature extraction input (2.0 = 2x resolution feature map)
+FEATURE_SCALE = (
+    4.0  # Scale factor for feature extraction input (2.0 = 2x resolution feature map)
+)
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
@@ -42,7 +44,9 @@ IMAGE_PATH: str = ""
 MODEL_PATH = "/data/models/dinov3-vitl16-pretrain-lvd1689m"
 
 
-def preprocess_image(image: Image.Image, image_size: int, patch_size: int, feature_scale: float = 1.0):
+def preprocess_image(
+    image: Image.Image, image_size: int, patch_size: int, feature_scale: float = 1.0
+):
     """Preprocess a PIL image for DINOv3.
 
     Returns display image and feature extraction tensor (possibly at different resolution).
@@ -73,7 +77,9 @@ def preprocess_image(image: Image.Image, image_size: int, patch_size: int, featu
     return image_display, img_tensor
 
 
-def load_and_preprocess_image(path: str, image_size: int, patch_size: int, feature_scale: float = 1.0):
+def load_and_preprocess_image(
+    path: str, image_size: int, patch_size: int, feature_scale: float = 1.0
+):
     """Load image from file and preprocess for DINOv3."""
     image = Image.open(path).convert("RGB")
     return preprocess_image(image, image_size, patch_size, feature_scale)
@@ -82,15 +88,17 @@ def load_and_preprocess_image(path: str, image_size: int, patch_size: int, featu
 def get_clipboard_text():
     """Get text from system clipboard."""
     for cmd in [
-        ['wl-paste', '--no-newline'],
-        ['xclip', '-selection', 'clipboard', '-o'],
+        ["wl-paste", "--no-newline"],
+        ["xclip", "-selection", "clipboard", "-o"],
     ]:
         try:
             print(f"[clipboard] trying text: {' '.join(cmd)}")
             result = subprocess.run(cmd, capture_output=True, timeout=5, check=False)
-            print(f"[clipboard]   rc={result.returncode}, stdout={len(result.stdout)}B, stderr={result.stderr.decode(errors='ignore').strip()!r}")
+            print(
+                f"[clipboard]   rc={result.returncode}, stdout={len(result.stdout)}B, stderr={result.stderr.decode(errors='ignore').strip()!r}"
+            )
             if result.returncode == 0 and result.stdout:
-                text = result.stdout.decode('utf-8', errors='ignore').strip()
+                text = result.stdout.decode("utf-8", errors="ignore").strip()
                 print(f"[clipboard]   got text: {text[:200]!r}")
                 return text
         except FileNotFoundError:
@@ -107,13 +115,15 @@ def get_clipboard_image():
     """
     # Try image data from clipboard
     for cmd in [
-        ['wl-paste', '--type', 'image/png'],
-        ['xclip', '-selection', 'clipboard', '-t', 'image/png', '-o'],
+        ["wl-paste", "--type", "image/png"],
+        ["xclip", "-selection", "clipboard", "-t", "image/png", "-o"],
     ]:
         try:
             print(f"[clipboard] trying image: {' '.join(cmd)}")
             result = subprocess.run(cmd, capture_output=True, timeout=5, check=False)
-            print(f"[clipboard]   rc={result.returncode}, stdout={len(result.stdout)}B, stderr={result.stderr.decode(errors='ignore').strip()!r}")
+            print(
+                f"[clipboard]   rc={result.returncode}, stdout={len(result.stdout)}B, stderr={result.stderr.decode(errors='ignore').strip()!r}"
+            )
             if result.returncode == 0 and result.stdout:
                 try:
                     img = Image.open(io.BytesIO(result.stdout)).convert("RGB")
@@ -129,13 +139,15 @@ def get_clipboard_image():
     # Try clipboard text as URL
     print("[clipboard] no image data, trying text as URL...")
     text = get_clipboard_text()
-    if text and re.match(r'https?://', text):
+    if text and re.match(r"https?://", text):
         print(f"[clipboard] fetching URL: {text[:200]}")
         try:
-            req = urllib.request.Request(text, headers={'User-Agent': 'Mozilla/5.0'})
+            req = urllib.request.Request(text, headers={"User-Agent": "Mozilla/5.0"})
             with urllib.request.urlopen(req, timeout=15) as resp:
                 data = resp.read()
-                print(f"[clipboard]   got {len(data)}B, content-type={resp.headers.get('Content-Type')}")
+                print(
+                    f"[clipboard]   got {len(data)}B, content-type={resp.headers.get('Content-Type')}"
+                )
                 img = Image.open(io.BytesIO(data)).convert("RGB")
                 print(f"[clipboard]   decoded image: {img.size}")
                 return img
@@ -152,16 +164,14 @@ def extract_features(model, image_tensor, embed_dim):
     n_layers = len(model.layer)
 
     def rms(x):
-        return jnp.sqrt(jnp.mean(x ** 2))
-    print('pooler_output:', rms(model(image_tensor.astype(jnp.float32)).pooler_output))
+        return jnp.sqrt(jnp.mean(x**2))
+
+    print("pooler_output:", rms(model(image_tensor.astype(jnp.float32)).pooler_output))
 
     @pjit
     def fwd(model: Dinov3VitModel, image_tensor: Array) -> Array:
         features = model.get_intermediate_layers(
-            image_tensor.astype(jnp.float32),
-            n=n_layers,
-            reshape=True,
-            norm=True
+            image_tensor.astype(jnp.float32), n=n_layers, reshape=True, norm=True
         )
         x = features[-1]
         assert isinstance(x, jax.Array)  # return_class_token=False: patch tokens only
@@ -173,9 +183,10 @@ def extract_features(model, image_tensor, embed_dim):
     return fwd(model, image_tensor)
 
 
-def apply_colormap(values, cmap_name='viridis'):
+def apply_colormap(values, cmap_name="viridis"):
     """Apply matplotlib colormap to normalized values."""
     import matplotlib
+
     cmap = matplotlib.colormaps[cmap_name]
     rgba = cmap(values)
     return (rgba[..., :3] * 255).astype(np.uint8)
@@ -190,7 +201,9 @@ class SimilarityVisualizer:
 
         # Precompute normalized features for fast similarity
         features_flat = features.reshape(-1, self.C)
-        self.features_norm = (features_flat - features_flat.mean(axis=1, keepdims=True)) / (np.linalg.norm(features_flat, axis=1, keepdims=True) + 1e-8)
+        self.features_norm = (
+            features_flat - features_flat.mean(axis=1, keepdims=True)
+        ) / (np.linalg.norm(features_flat, axis=1, keepdims=True) + 1e-8)
 
         # JIT compile similarity computation
         @jax.jit
@@ -233,7 +246,9 @@ class SimilarityVisualizer:
         similarities = self.compute_similarity_vec(self.features_norm_jax, avg_feature)
         return np.array(similarities).reshape(self.H, self.W)
 
-    def render_frame(self, row: int, col: int) -> tuple[np.ndarray, tuple[float, float, float]]:
+    def render_frame(
+        self, row: int, col: int
+    ) -> tuple[np.ndarray, tuple[float, float, float]]:
         """Render the blended visualization."""
         # Compute similarity
         if self.painted_tiles:
@@ -246,10 +261,12 @@ class SimilarityVisualizer:
         sim_norm = (sim_map - sim_min) / (sim_max - sim_min + 1e-8)
 
         # Apply colormap
-        sim_rgb = apply_colormap(sim_norm, 'viridis')
+        sim_rgb = apply_colormap(sim_norm, "viridis")
 
         # Resize similarity map to image size
-        sim_pil = Image.fromarray(sim_rgb).resize((self.img_w, self.img_h), Image.Resampling.NEAREST)
+        sim_pil = Image.fromarray(sim_rgb).resize(
+            (self.img_w, self.img_h), Image.Resampling.NEAREST
+        )
         sim_array = np.array(sim_pil).astype(np.float32) / 255.0
 
         # Blend with original
@@ -318,14 +335,20 @@ def main():
     img_w, img_h = 512, 512  # default placeholder size
     if IMAGE_PATH and os.path.isfile(IMAGE_PATH):
         print("Loading image...")
-        image, image_tensor = load_and_preprocess_image(IMAGE_PATH, IMAGE_SIZE, PATCH_SIZE, FEATURE_SCALE)
+        image, image_tensor = load_and_preprocess_image(
+            IMAGE_PATH, IMAGE_SIZE, PATCH_SIZE, FEATURE_SCALE
+        )
         print(f"Display size: {image.size}")
         print(f"Feature tensor shape: {image_tensor.shape}")
 
         print("Extracting features...")
-        features = extract_features(model, image_tensor, embed_dim=model.config.hidden_size)
+        features = extract_features(
+            model, image_tensor, embed_dim=model.config.hidden_size
+        )
         features_np = np.array(features)
-        print(f"Feature grid: {features_np.shape} ({features_np.shape[1]}x{features_np.shape[0]} patches)")
+        print(
+            f"Feature grid: {features_np.shape} ({features_np.shape[1]}x{features_np.shape[0]} patches)"
+        )
         vis = SimilarityVisualizer(image, features_np)
         img_w, img_h = image.size
     else:
@@ -341,7 +364,7 @@ def main():
         vp_h: int = 0
 
     CONTROLS_PAD_Y = 100  # vertical space for controls above plot
-    CONTROLS_PAD_X = 30   # horizontal padding
+    CONTROLS_PAD_X = 30  # horizontal padding
     state = State(vis=vis, img_w=img_w, img_h=img_h)
 
     # Setup DearPyGui
@@ -360,7 +383,7 @@ def main():
             height=img_h,
             default_value=initial_frame,  # ty: ignore[invalid-argument-type] - dpg accepts numpy buffers
             format=dpg.mvFormat_Float_rgba,
-            tag=f"main_texture_{state.tex_id}"
+            tag=f"main_texture_{state.tex_id}",
         )
 
     def update_display():
@@ -370,13 +393,17 @@ def main():
         frame, stats = v.render_frame(v.current_row, v.current_col)
         dpg.set_value(f"main_texture_{state.tex_id}", frame)
         if v.painted_tiles:
-            dpg.set_value("stats_text",
+            dpg.set_value(
+                "stats_text",
                 f"Paint: {len(v.painted_tiles)} tiles | "
-                f"Similarity: [{stats[0]:.3f}, {stats[1]:.3f}] mean={stats[2]:.3f}")
+                f"Similarity: [{stats[0]:.3f}, {stats[1]:.3f}] mean={stats[2]:.3f}",
+            )
         else:
-            dpg.set_value("stats_text",
+            dpg.set_value(
+                "stats_text",
                 f"Patch: ({v.current_row}, {v.current_col}) | "
-                f"Similarity: [{stats[0]:.3f}, {stats[1]:.3f}] mean={stats[2]:.3f}")
+                f"Similarity: [{stats[0]:.3f}, {stats[1]:.3f}] mean={stats[2]:.3f}",
+            )
 
     def resize_plot_to_fit():
         """Resize the plot to fit the current viewport, preserving aspect ratio."""
@@ -432,7 +459,9 @@ def main():
         row = max(0, min(v.H - 1, row))
         col = max(0, min(v.W - 1, col))
 
-        ctrl_held = dpg.is_key_down(dpg.mvKey_LControl) or dpg.is_key_down(dpg.mvKey_RControl)
+        ctrl_held = dpg.is_key_down(dpg.mvKey_LControl) or dpg.is_key_down(
+            dpg.mvKey_RControl
+        )
 
         if ctrl_held:
             # Paint mode: add tile to paint buffer
@@ -463,7 +492,10 @@ def main():
             dpg.set_value("stats_text", "No image found in clipboard")
             return
 
-        dpg.set_value("stats_text", f"Processing pasted image ({clip_img.size[0]}x{clip_img.size[1]})...")
+        dpg.set_value(
+            "stats_text",
+            f"Processing pasted image ({clip_img.size[0]}x{clip_img.size[1]})...",
+        )
         dpg.render_dearpygui_frame()
 
         img, tensor = preprocess_image(clip_img, IMAGE_SIZE, PATCH_SIZE, FEATURE_SCALE)
@@ -486,7 +518,9 @@ def main():
         dpg.delete_item("image_series")
         dpg.delete_item(old_tag)
 
-        initial_frame, _ = new_vis.render_frame(new_vis.current_row, new_vis.current_col)
+        initial_frame, _ = new_vis.render_frame(
+            new_vis.current_row, new_vis.current_col
+        )
         dpg.add_raw_texture(
             width=new_w,
             height=new_h,
@@ -512,11 +546,16 @@ def main():
         state.vp_h = 0
 
         update_display()
-        print(f"Pasted image: {clip_img.size} -> display {new_w}x{new_h}, features {feats_np.shape}")
+        print(
+            f"Pasted image: {clip_img.size} -> display {new_w}x{new_h}, features {feats_np.shape}"
+        )
 
     # Create window
     with dpg.window(label="DINOv3 Feature Similarity", tag="main_window"):
-        dpg.add_text("Click to explore | Ctrl+Click to paint tiles | Ctrl+V to paste", color=(200, 200, 200))
+        dpg.add_text(
+            "Click to explore | Ctrl+Click to paint tiles | Ctrl+V to paste",
+            color=(200, 200, 200),
+        )
         dpg.add_text("", tag="stats_text")
 
         dpg.add_slider_float(
@@ -524,7 +563,7 @@ def main():
             default_value=0.5,
             min_value=0.0,
             max_value=1.0,
-            callback=on_alpha_change
+            callback=on_alpha_change,
         )
 
         dpg.add_separator()
@@ -538,18 +577,22 @@ def main():
             no_menus=True,
             no_box_select=True,
             equal_aspects=True,
-            tag="main_plot"
+            tag="main_plot",
         ):
-            dpg.add_plot_axis(dpg.mvXAxis, no_tick_labels=True, no_tick_marks=True, tag="x_axis")
+            dpg.add_plot_axis(
+                dpg.mvXAxis, no_tick_labels=True, no_tick_marks=True, tag="x_axis"
+            )
             dpg.set_axis_limits("x_axis", 0, img_w)
 
-            with dpg.plot_axis(dpg.mvYAxis, no_tick_labels=True, no_tick_marks=True, tag="y_axis"):
+            with dpg.plot_axis(
+                dpg.mvYAxis, no_tick_labels=True, no_tick_marks=True, tag="y_axis"
+            ):
                 dpg.set_axis_limits("y_axis", img_h, 0)  # Flip Y axis
                 dpg.add_image_series(
                     f"main_texture_{state.tex_id}",
                     bounds_min=[0, 0],
                     bounds_max=[img_w, img_h],
-                    tag="image_series"
+                    tag="image_series",
                 )
 
     # Initial stats update
@@ -560,7 +603,9 @@ def main():
 
     init_vp_w = min(img_w + CONTROLS_PAD_X, 1600)
     init_vp_h = min(img_h + CONTROLS_PAD_Y, 1000)
-    dpg.create_viewport(title="DINOv3 Feature Similarity Visualizer", width=init_vp_w, height=init_vp_h)
+    dpg.create_viewport(
+        title="DINOv3 Feature Similarity Visualizer", width=init_vp_w, height=init_vp_h
+    )
     dpg.setup_dearpygui()
     dpg.show_viewport()
     dpg.set_primary_window("main_window", True)
@@ -573,7 +618,9 @@ def main():
 
         # Detect Ctrl+V keypress (edge-triggered)
         v_is_down = dpg.is_key_down(dpg.mvKey_V)
-        ctrl_is_down = dpg.is_key_down(dpg.mvKey_LControl) or dpg.is_key_down(dpg.mvKey_RControl)
+        ctrl_is_down = dpg.is_key_down(dpg.mvKey_LControl) or dpg.is_key_down(
+            dpg.mvKey_RControl
+        )
         if v_is_down and not v_was_down and ctrl_is_down:
             handle_paste()
         v_was_down = v_is_down

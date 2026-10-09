@@ -55,9 +55,14 @@ class Dinov3VitEmbeddings(eqx.Module):
 
         # Prepend CLS + register tokens
         assert self.register_tokens is not None
-        cls_token = jnp.broadcast_to(self.cls_token(), (batch_size, 1, self.hidden_size))
-        register_tokens = jnp.broadcast_to(
-            self.register_tokens(), (batch_size, self.num_register_tokens, self.hidden_size)
+        cls_token = jnp.broadcast_to(
+            self.cls_token(), (batch_size, 1, self.hidden_size)
         )
-        embeddings = jnp.concatenate([cls_token, register_tokens, patch_embeddings], axis=1)
+        register_tokens = jnp.broadcast_to(
+            self.register_tokens(),
+            (batch_size, self.num_register_tokens, self.hidden_size),
+        )
+        embeddings = jnp.concatenate(
+            [cls_token, register_tokens, patch_embeddings], axis=1
+        )
         return embeddings

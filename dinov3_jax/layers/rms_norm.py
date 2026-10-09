@@ -8,6 +8,7 @@ from dinov3_jax.eepynox.nn.param import Param
 
 class RMSNorm(eqx.Module):
     """Root Mean Square Layer Normalization."""
+
     weight: Param
     dim: int = eqx.field(static=True)
     eps: float = eqx.field(static=True)
@@ -22,13 +23,16 @@ class RMSNorm(eqx.Module):
 
     def _norm(self, x: Array) -> Array:
         """Compute RMS normalization."""
-        return x * jax.lax.rsqrt(jnp.mean(jnp.square(x), axis=-1, keepdims=True) + self.eps)
-    
+        return x * jax.lax.rsqrt(
+            jnp.mean(jnp.square(x), axis=-1, keepdims=True) + self.eps
+        )
+
     def __call__(self, x: Array) -> Array:
         # Normalize in float32 for stability
         x_float32 = x.astype(jnp.float32)
         output = self._norm(x_float32) * self.weight()
         return output.astype(x.dtype)
+
 
 class LayerNorm(eqx.Module):
     weight: Param
@@ -49,7 +53,9 @@ class LayerNorm(eqx.Module):
         # Normalize in float32 for stability
         x_float32 = x.astype(jnp.float32)
         mu = jnp.mean(x_float32, axis=-1, keepdims=True)
-        sigma = jnp.sqrt(jnp.mean((x_float32 - mu) ** 2, axis=-1, keepdims=True) + self.eps)
+        sigma = jnp.sqrt(
+            jnp.mean((x_float32 - mu) ** 2, axis=-1, keepdims=True) + self.eps
+        )
         normalized = (x_float32 - mu) / sigma
         output = normalized * self.weight() + self.bias()
         return output.astype(x.dtype)

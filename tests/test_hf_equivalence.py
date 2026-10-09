@@ -49,7 +49,9 @@ class TestEmbeddings:
             hf_emb = hf_model.embeddings(x_pt)
 
         np.testing.assert_allclose(
-            np.array(jax_emb), hf_emb.numpy(), atol=1e-5,
+            np.array(jax_emb),
+            hf_emb.numpy(),
+            atol=1e-5,
             err_msg="Embeddings output mismatch",
         )
 
@@ -67,11 +69,15 @@ class TestRoPE:
             cos_pt, sin_pt = hf_model.rope_embeddings(x_pt)
 
         np.testing.assert_allclose(
-            np.array(cos_jax), cos_pt.numpy(), atol=1e-6,
+            np.array(cos_jax),
+            cos_pt.numpy(),
+            atol=1e-6,
             err_msg="RoPE cos mismatch",
         )
         np.testing.assert_allclose(
-            np.array(sin_jax), sin_pt.numpy(), atol=1e-6,
+            np.array(sin_jax),
+            sin_pt.numpy(),
+            atol=1e-6,
             err_msg="RoPE sin mismatch",
         )
 
@@ -100,7 +106,9 @@ class TestSingleLayer:
             hf_out = hf_layers[0](hf_emb, position_embeddings=(cos_pt, sin_pt))
 
         np.testing.assert_allclose(
-            np.array(jax_out), hf_out.numpy(), atol=1e-3,
+            np.array(jax_out),
+            hf_out.numpy(),
+            atol=1e-3,
             err_msg="First layer output mismatch",
         )
 
@@ -161,7 +169,9 @@ class TestFullModel:
 
 
 class TestHalfPrecision:
-    @pytest.mark.parametrize("dtype, min_cos", [(jnp.float16, 0.9999), (jnp.bfloat16, 0.999)])
+    @pytest.mark.parametrize(
+        "dtype, min_cos", [(jnp.float16, 0.9999), (jnp.bfloat16, 0.999)]
+    )
     def test_forward(self, models, sample_input, dtype, min_cos):
         """load_dinov3(dtype=...) casts every parameter and runs end to end in that dtype."""
         import jax
@@ -205,11 +215,18 @@ class TestEagerAttention:
         def heads(t):
             return t.reshape(B, N, att.num_heads, att.head_dim).transpose(0, 2, 1, 3)
 
-        q, k = apply_rotary_pos_emb(heads(att.q_proj(h)), heads(att.k_proj(h)), cos, sin)
-        q, k, v = (t.transpose(0, 2, 1, 3).astype(jnp.float16) for t in (q, k, heads(att.v_proj(h))))
+        q, k = apply_rotary_pos_emb(
+            heads(att.q_proj(h)), heads(att.k_proj(h)), cos, sin
+        )
+        q, k, v = (
+            t.transpose(0, 2, 1, 3).astype(jnp.float16)
+            for t in (q, k, heads(att.v_proj(h)))
+        )
 
         out = np.array(att._eager_attention(q, k, v), dtype=np.float32)
-        ref = np.array(att._eager_attention(*(t.astype(jnp.float32) for t in (q, k, v))))
+        ref = np.array(
+            att._eager_attention(*(t.astype(jnp.float32) for t in (q, k, v)))
+        )
 
         assert not np.isnan(out).any()
         a = out / np.linalg.norm(out, axis=-1, keepdims=True)

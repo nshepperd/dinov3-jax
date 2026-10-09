@@ -17,8 +17,18 @@ class Dinov3VitMLP(eqx.Module):
     hidden_act: str = eqx.field(static=True)
 
     def __init__(self, config: Dinov3VitConfig, dtype=jnp.float32):
-        self.up_proj = Linear(config.hidden_size, config.intermediate_size, use_bias=config.mlp_bias, dtype=dtype)
-        self.down_proj = Linear(config.intermediate_size, config.hidden_size, use_bias=config.mlp_bias, dtype=dtype)
+        self.up_proj = Linear(
+            config.hidden_size,
+            config.intermediate_size,
+            use_bias=config.mlp_bias,
+            dtype=dtype,
+        )
+        self.down_proj = Linear(
+            config.intermediate_size,
+            config.hidden_size,
+            use_bias=config.mlp_bias,
+            dtype=dtype,
+        )
         self.hidden_act = config.hidden_act
 
     def __call__(self, x: Array) -> Array:
@@ -37,9 +47,24 @@ class Dinov3VitGatedMLP(eqx.Module):
     hidden_act: str = eqx.field(static=True)
 
     def __init__(self, config: Dinov3VitConfig, dtype=jnp.float32):
-        self.gate_proj = Linear(config.hidden_size, config.intermediate_size, use_bias=config.mlp_bias, dtype=dtype)
-        self.up_proj = Linear(config.hidden_size, config.intermediate_size, use_bias=config.mlp_bias, dtype=dtype)
-        self.down_proj = Linear(config.intermediate_size, config.hidden_size, use_bias=config.mlp_bias, dtype=dtype)
+        self.gate_proj = Linear(
+            config.hidden_size,
+            config.intermediate_size,
+            use_bias=config.mlp_bias,
+            dtype=dtype,
+        )
+        self.up_proj = Linear(
+            config.hidden_size,
+            config.intermediate_size,
+            use_bias=config.mlp_bias,
+            dtype=dtype,
+        )
+        self.down_proj = Linear(
+            config.intermediate_size,
+            config.hidden_size,
+            use_bias=config.mlp_bias,
+            dtype=dtype,
+        )
         self.hidden_act = config.hidden_act
 
     def __call__(self, x: Array) -> Array:

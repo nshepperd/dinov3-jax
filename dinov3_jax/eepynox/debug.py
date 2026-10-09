@@ -1,4 +1,5 @@
 """Generally useful debugging utilities."""
+
 import sys
 from collections.abc import Callable
 from functools import wraps
@@ -12,13 +13,13 @@ def maybe_debugpy_postmortem(excinfo):
     """
     try:
         import debugpy  # noqa: T100
+
         pm = debugpy.trigger_exception_handler
     except (ImportError, AttributeError) as e:
         print(f"[DEBUGPY PM] Could not import debugpy.postmortem: {e}")
         return
-    
-    pm(excinfo, as_uncaught=True)
 
+    pm(excinfo, as_uncaught=True)
 
 
 def debugpy_pm_tb():
@@ -26,6 +27,7 @@ def debugpy_pm_tb():
 
 
 T = TypeVar("T", bound=Callable)
+
 
 class debugpy_pm:
     """A decorator and context manager that causes exceptions that escape this context to trigger postmortem debugging immediately."""

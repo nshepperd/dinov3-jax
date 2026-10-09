@@ -43,7 +43,9 @@ class Conv2d(eqx.Module):
         self.padding = padding
         self.dilation = dilation
         self.groups = groups
-        self.weight = Param((out_features, in_features // groups, kernel_size, kernel_size), dtype)
+        self.weight = Param(
+            (out_features, in_features // groups, kernel_size, kernel_size), dtype
+        )
         self.bias = Param((out_features,), dtype) if use_bias else None
         self.dtype = jnp.dtype(dtype)
         self.use_bias = use_bias
@@ -53,11 +55,15 @@ class Conv2d(eqx.Module):
             self.groups / (self.in_features * self.kernel_size * self.kernel_size)
         )
         weight = self.weight.with_value(
-            jax.random.uniform(key, self.weight.shape, minval=-A, maxval=A, dtype=self.dtype)
+            jax.random.uniform(
+                key, self.weight.shape, minval=-A, maxval=A, dtype=self.dtype
+            )
         )
         if self.bias is not None:
             bias = self.bias.with_value(
-                jax.random.uniform(key, self.bias.shape, minval=-A, maxval=A, dtype=self.dtype)
+                jax.random.uniform(
+                    key, self.bias.shape, minval=-A, maxval=A, dtype=self.dtype
+                )
             )
         else:
             bias = None

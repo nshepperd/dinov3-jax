@@ -22,16 +22,26 @@ class Dinov3VitAttention(eqx.Module):
     embed_dim: int = eqx.field(static=True)
     use_flash_attn: bool = eqx.field(static=True)
 
-    def __init__(self, config: Dinov3VitConfig, use_flash_attn: bool = True, dtype=jnp.float32):
+    def __init__(
+        self, config: Dinov3VitConfig, use_flash_attn: bool = True, dtype=jnp.float32
+    ):
         self.embed_dim = config.hidden_size
         self.num_heads = config.num_attention_heads
         self.head_dim = config.hidden_size // config.num_attention_heads
         self.use_flash_attn = use_flash_attn
 
-        self.q_proj = Linear(self.embed_dim, self.embed_dim, use_bias=config.query_bias, dtype=dtype)
-        self.k_proj = Linear(self.embed_dim, self.embed_dim, use_bias=config.key_bias, dtype=dtype)
-        self.v_proj = Linear(self.embed_dim, self.embed_dim, use_bias=config.value_bias, dtype=dtype)
-        self.o_proj = Linear(self.embed_dim, self.embed_dim, use_bias=config.proj_bias, dtype=dtype)
+        self.q_proj = Linear(
+            self.embed_dim, self.embed_dim, use_bias=config.query_bias, dtype=dtype
+        )
+        self.k_proj = Linear(
+            self.embed_dim, self.embed_dim, use_bias=config.key_bias, dtype=dtype
+        )
+        self.v_proj = Linear(
+            self.embed_dim, self.embed_dim, use_bias=config.value_bias, dtype=dtype
+        )
+        self.o_proj = Linear(
+            self.embed_dim, self.embed_dim, use_bias=config.proj_bias, dtype=dtype
+        )
 
     def __call__(
         self,
@@ -78,5 +88,7 @@ class Dinov3VitAttention(eqx.Module):
         from fa4_jax import flash_attn
 
         dtype = q.dtype
-        out = flash_attn(q.astype(jnp.float16), k.astype(jnp.float16), v.astype(jnp.float16))
+        out = flash_attn(
+            q.astype(jnp.float16), k.astype(jnp.float16), v.astype(jnp.float16)
+        )
         return out.astype(dtype)

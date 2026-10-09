@@ -9,5 +9,6 @@ from dinov3_jax.eepynox.debug import debugpy_pm
 # sys.monitoring.set_events(sys.monitoring.DEBUGGER_ID,0)
 with debugpy_pm():
     import time
+
     time.sleep(10.0)
     raise RuntimeError("This is a test crash for debugpy post-mortem debugging.")

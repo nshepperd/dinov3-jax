@@ -54,5 +54,5 @@ metadata.allow-direct-references = true
 # this was added, and no later ones.
 exclude-newer-package = { cutejax = "2026-10-09" }
 
-[tool.ruff]
+[tool.ruff.lint]
 ignore = ["F722"]

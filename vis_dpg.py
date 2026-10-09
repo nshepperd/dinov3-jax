@@ -38,7 +38,7 @@ IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 
 # Paths - adjust these
-IMAGE_PATH = ""
+IMAGE_PATH: str = ""
 MODEL_PATH = "/data/models/dinov3-vitl16-pretrain-lvd1689m"
 
 
@@ -87,7 +87,7 @@ def get_clipboard_text():
     ]:
         try:
             print(f"[clipboard] trying text: {' '.join(cmd)}")
-            result = subprocess.run(cmd, capture_output=True, timeout=5)
+            result = subprocess.run(cmd, capture_output=True, timeout=5, check=False)
             print(f"[clipboard]   rc={result.returncode}, stdout={len(result.stdout)}B, stderr={result.stderr.decode(errors='ignore').strip()!r}")
             if result.returncode == 0 and result.stdout:
                 text = result.stdout.decode('utf-8', errors='ignore').strip()
@@ -96,7 +96,7 @@ def get_clipboard_text():
         except FileNotFoundError:
             print(f"[clipboard]   {cmd[0]} not found")
         except subprocess.TimeoutExpired:
-            print(f"[clipboard]   timeout")
+            print("[clipboard]   timeout")
     return None
 
 
@@ -112,19 +112,19 @@ def get_clipboard_image():
     ]:
         try:
             print(f"[clipboard] trying image: {' '.join(cmd)}")
-            result = subprocess.run(cmd, capture_output=True, timeout=5)
+            result = subprocess.run(cmd, capture_output=True, timeout=5, check=False)
             print(f"[clipboard]   rc={result.returncode}, stdout={len(result.stdout)}B, stderr={result.stderr.decode(errors='ignore').strip()!r}")
             if result.returncode == 0 and result.stdout:
                 try:
                     img = Image.open(io.BytesIO(result.stdout)).convert("RGB")
                     print(f"[clipboard]   got image: {img.size}")
                     return img
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 - arbitrary clipboard data; don't crash the GUI
                     print(f"[clipboard]   failed to decode image: {e}")
         except FileNotFoundError:
             print(f"[clipboard]   {cmd[0]} not found")
         except subprocess.TimeoutExpired:
-            print(f"[clipboard]   timeout")
+            print("[clipboard]   timeout")
 
     # Try clipboard text as URL
     print("[clipboard] no image data, trying text as URL...")
@@ -139,7 +139,7 @@ def get_clipboard_image():
                 img = Image.open(io.BytesIO(data)).convert("RGB")
                 print(f"[clipboard]   decoded image: {img.size}")
                 return img
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - arbitrary URL/content; don't crash the GUI
             print(f"[clipboard]   failed to fetch/decode URL: {e}")
     elif text:
         print(f"[clipboard] text is not a URL: {text[:200]!r}")
@@ -163,7 +163,8 @@ def extract_features(model, image_tensor, embed_dim):
             reshape=True,
             norm=True
         )
-        x = features[-1] if isinstance(features, tuple) else features
+        x = features[-1]
+        assert isinstance(x, jax.Array)  # return_class_token=False: patch tokens only
         x = x.squeeze(0)
         if len(x.shape) == 3 and x.shape[0] == embed_dim:
             x = x.transpose(1, 2, 0)  # HWC
@@ -174,8 +175,8 @@ def extract_features(model, image_tensor, embed_dim):
 
 def apply_colormap(values, cmap_name='viridis'):
     """Apply matplotlib colormap to normalized values."""
-    import matplotlib.pyplot as plt
-    cmap = plt.cm.get_cmap(cmap_name)
+    import matplotlib
+    cmap = matplotlib.colormaps[cmap_name]
     rgba = cmap(values)
     return (rgba[..., :3] * 255).astype(np.uint8)
 
@@ -349,7 +350,7 @@ def main():
     # Create texture
     with dpg.texture_registry(tag="tex_registry"):
         if vis:
-            initial_frame, stats = vis.render_frame(vis.current_row, vis.current_col)
+            initial_frame, _ = vis.render_frame(vis.current_row, vis.current_col)
         else:
             # Grey placeholder
             initial_frame = np.full(img_w * img_h * 4, 0.2, dtype=np.float32)
@@ -357,7 +358,7 @@ def main():
         dpg.add_raw_texture(
             width=img_w,
             height=img_h,
-            default_value=initial_frame,
+            default_value=initial_frame,  # ty: ignore[invalid-argument-type] - dpg accepts numpy buffers
             format=dpg.mvFormat_Float_rgba,
             tag=f"main_texture_{state.tex_id}"
         )
@@ -448,7 +449,7 @@ def main():
                 v.current_col = col
             update_display()
 
-    def on_alpha_change(sender, app_data):
+    def on_alpha_change(_sender, app_data):
         if state.vis is not None:
             state.vis.alpha = app_data
             update_display()
@@ -489,7 +490,7 @@ def main():
         dpg.add_raw_texture(
             width=new_w,
             height=new_h,
-            default_value=initial_frame,
+            default_value=initial_frame,  # ty: ignore[invalid-argument-type] - dpg accepts numpy buffers
             format=dpg.mvFormat_Float_rgba,
             tag=new_tag,
             parent="tex_registry",
@@ -572,9 +573,9 @@ def main():
 
         # Detect Ctrl+V keypress (edge-triggered)
         v_is_down = dpg.is_key_down(dpg.mvKey_V)
-        if v_is_down and not v_was_down:
-            if dpg.is_key_down(dpg.mvKey_LControl) or dpg.is_key_down(dpg.mvKey_RControl):
-                handle_paste()
+        ctrl_is_down = dpg.is_key_down(dpg.mvKey_LControl) or dpg.is_key_down(dpg.mvKey_RControl)
+        if v_is_down and not v_was_down and ctrl_is_down:
+            handle_paste()
         v_was_down = v_is_down
 
         dpg.render_dearpygui_frame()

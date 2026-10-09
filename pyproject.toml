@@ -6,34 +6,36 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "jax>=0.8.2",
-    "torch",
-    "torchvision",
+    "equinox",
+    "jaxtyping",
+    "numpy",
+    "pydantic",
+    "safetensors",
     "fa4-jax @ git+https://github.com/nshepperd/fa4-jax.git@main",
     "cutejax>=0.1.5",
-    "pytest",
-    "numpy",
-    "scipy",
-    "scikit-learn",
-    "einops",
-    "tqdm",
-    "matplotlib",
-    "ipykernel",
-    "ipywidgets",
-    "Pillow",
-    "pydantic",
-    "equinox",
-    "safetensors",
-    "transformers>=4.56",  # first release with Dinov3VitModel
-    "huggingface_hub",
 ]
 
 [dependency-groups]
 dev = [
     "jax[cuda13]",
     "nvidia-cutlass-dsl[cu13]>=4.7.0",
+    # tests: HF reference model
+    "pytest",
+    "torch",
+    "transformers>=4.56",  # first release with Dinov3VitModel
     "lovely-jax",
     "lovely-tensors",
+    # vis_dpg.py
     "dearpygui",
+    "matplotlib",
+    "Pillow",
+    # feature_vis_*.py / vis.ipynb scratch
+    "torchvision",
+    "scipy",
+    "scikit-learn",
+    "einops",
+    "ipykernel",
+    "ipywidgets",
 ]
 
 [build-system]

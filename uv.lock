@@ -456,67 +456,65 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "cutejax" },
-    { name = "einops" },
     { name = "equinox" },
     { name = "fa4-jax" },
-    { name = "huggingface-hub" },
-    { name = "ipykernel" },
-    { name = "ipywidgets" },
     { name = "jax" },
-    { name = "matplotlib" },
+    { name = "jaxtyping" },
     { name = "numpy" },
-    { name = "pillow" },
     { name = "pydantic" },
-    { name = "pytest" },
     { name = "safetensors" },
-    { name = "scikit-learn" },
-    { name = "scipy" },
-    { name = "torch" },
-    { name = "torchvision" },
-    { name = "tqdm" },
-    { name = "transformers" },
 ]
 
 [package.dev-dependencies]
 dev = [
     { name = "dearpygui" },
+    { name = "einops" },
+    { name = "ipykernel" },
+    { name = "ipywidgets" },
     { name = "jax", extra = ["cuda13"] },
     { name = "lovely-jax" },
     { name = "lovely-tensors" },
+    { name = "matplotlib" },
     { name = "nvidia-cutlass-dsl", extra = ["cu13"] },
+    { name = "pillow" },
+    { name = "pytest" },
+    { name = "scikit-learn" },
+    { name = "scipy" },
+    { name = "torch" },
+    { name = "torchvision" },
+    { name = "transformers" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "cutejax", specifier = ">=0.1.5" },
-    { name = "einops" },
     { name = "equinox" },
     { name = "fa4-jax", git = "https://github.com/nshepperd/fa4-jax.git?rev=main" },
-    { name = "huggingface-hub" },
-    { name = "ipykernel" },
-    { name = "ipywidgets" },
     { name = "jax", specifier = ">=0.8.2" },
-    { name = "matplotlib" },
+    { name = "jaxtyping" },
     { name = "numpy" },
-    { name = "pillow" },
     { name = "pydantic" },
-    { name = "pytest" },
     { name = "safetensors" },
-    { name = "scikit-learn" },
-    { name = "scipy" },
-    { name = "torch" },
-    { name = "torchvision" },
-    { name = "tqdm" },
-    { name = "transformers", specifier = ">=4.56" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "dearpygui" },
+    { name = "einops" },
+    { name = "ipykernel" },
+    { name = "ipywidgets" },
     { name = "jax", extras = ["cuda13"] },
     { name = "lovely-jax" },
     { name = "lovely-tensors" },
+    { name = "matplotlib" },
     { name = "nvidia-cutlass-dsl", extras = ["cu13"], specifier = ">=4.7.0" },
+    { name = "pillow" },
+    { name = "pytest" },
+    { name = "scikit-learn" },
+    { name = "scipy" },
+    { name = "torch" },
+    { name = "torchvision" },
+    { name = "transformers", specifier = ">=4.56" },
 ]
 
 [[package]]
